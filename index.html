@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="pt-AO">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Gestão de Frota</title>
+    <link rel="shortcut icon" href="/logo.png" type="image/png" />
+
+    <!-- Google Fonts: Poppins (mirrors original) -->
+    <link
+      href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+
+    <!-- Bootstrap Icons (mirrors original — all pages use bi-*) -->
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css"
+    />
+
+    <!-- Leaflet CSS (used by MonitoramentoPage) -->
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    />
+  </head>
+  <body>
+    <div id="root"></div>
+
+    <!-- Chart.js (used by DashboardPage — loaded globally so the module can
+         reference window.Chart after the CDN script runs) -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <!-- Leaflet JS (used by MonitoramentoPage) -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <!-- React entry point -->
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
