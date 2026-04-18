@@ -30,8 +30,8 @@ function setCol<T>(name: string, col: Collection<T>): void {
   saveJSON(`coll:${name}`, col);
 }
 
-function colToArray<T extends { id: string }>(col: Collection<Omit<T, "id">>): T[] {
-  return Object.entries(col).map(([id, data]) => ({ id, ...data } as T));
+function colToArray<T>(col: Collection<any>): (T & { id: string })[] {
+  return Object.entries(col).map(([id, data]) => ({ id, ...(data as object) } as T & { id: string }));
 }
 
 function genId(): string {
@@ -87,40 +87,40 @@ export function authCurrentUser(): AppUser | null {
 }
 
 // ─── Generic CRUD factory ─────────────────────────────────────────────────────
-function makeCRUD<T extends { id: string }>(collName: string) {
+function makeCRUD<T>(collName: string) {
   return {
-    getAll(): T[] {
-      return colToArray<T>(getCol<Omit<T, "id">>(collName));
+    getAll(): (T & { id: string })[] {
+      return colToArray<T>(getCol<any>(collName));
     },
-    getById(id: string): T | null {
-      const col = getCol<Omit<T, "id">>(collName);
-      return col[id] ? ({ id, ...col[id] } as T) : null;
+    getById(id: string): (T & { id: string }) | null {
+      const col = getCol<any>(collName);
+      return col[id] ? ({ id, ...col[id] } as unknown as T & { id: string }) : null;
     },
-    add(data: Omit<T, "id">): T {
-      const col = getCol<Omit<T, "id">>(collName);
+    add(data: Omit<T, "id">): T & { id: string } {
+      const col = getCol<any>(collName);
       const id = genId();
       const record = { ...data, createdAt: new Date().toISOString() };
       col[id] = record;
       setCol(collName, col);
-      return { id, ...record } as T;
+      return ({ id, ...record } as unknown) as T & { id: string };
     },
-    update(id: string, data: Partial<Omit<T, "id">>): T | null {
-      const col = getCol<Omit<T, "id">>(collName);
+    update(id: string, data: Partial<Omit<T, "id">>): (T & { id: string }) | null {
+      const col = getCol<any>(collName);
       if (!col[id]) return null;
       col[id] = { ...col[id], ...data };
       setCol(collName, col);
-      return { id, ...col[id] } as T;
+      return ({ id, ...col[id] } as unknown) as T & { id: string };
     },
     remove(id: string): boolean {
-      const col = getCol<Omit<T, "id">>(collName);
+      const col = getCol<any>(collName);
       if (!col[id]) return false;
       delete col[id];
       setCol(collName, col);
       return true;
     },
     exists(field: keyof T, value: unknown, excludeId?: string): boolean {
-      return colToArray<T>(getCol<Omit<T, "id">>(collName)).some(
-        (item) => item[field] === value && item.id !== excludeId
+      return colToArray<T>(getCol<any>(collName)).some(
+        (item) => item[field as keyof (T & { id: string })] === value && item.id !== excludeId
       );
     },
   };
