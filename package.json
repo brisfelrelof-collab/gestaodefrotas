@@ -6,8 +6,8 @@
   "description": "Sistema de Gestão de Frota — React/TSX port of the original HTML/JS project",
   "scripts": {
     "dev":     "vite",
-    "build":   "npx tsc -b && npx vite build",
-    "preview": "vite preview",
+    "build":   "node ./node_modules/typescript/bin/tsc -b && node ./node_modules/vite/bin/vite.js build",
+    "preview": "node ./node_modules/vite/bin/vite.js preview",
     "lint":    "eslint src --ext ts,tsx --report-unused-disable-directives"
   },
   "dependencies": {
