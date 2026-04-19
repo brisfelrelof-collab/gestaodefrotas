@@ -22,11 +22,11 @@ export default function handler(req, res) {
   if (req.method === "POST") {
     const { nome: rawNome, lat, lng, spd, fix, sat, alt } = req.body;
 
-    // Normaliza nomes comuns (aceita variações como "automove1" ou "automovel1")
+    // Normaliza nomes para o padrão 'viatura' (ex.: automove1/automovel1 -> viatura1)
     const normalizeNome = (n) => {
       if (!n) return n;
-      // troca prefixes automov/automovel/automove por 'viatura'
-      return n.replace(/^automovel?/i, "viatura").replace(/^automove/i, "viatura");
+      // aceita prefixes como 'automov', 'automove', 'automovel' e normaliza para 'viatura'
+      return String(n).replace(/^automov(?:el|e)?/i, "viatura");
     };
     const nome = normalizeNome(String(rawNome));
 
@@ -55,7 +55,7 @@ export default function handler(req, res) {
     const { nome: qNome } = req.query;
     const normalizeNome = (n) => {
       if (!n) return n;
-      return String(n).replace(/^automovel?/i, "viatura").replace(/^automove/i, "viatura");
+      return String(n).replace(/^automov(?:el|e)?/i, "viatura");
     };
     const nome = qNome ? normalizeNome(qNome) : undefined;
 
