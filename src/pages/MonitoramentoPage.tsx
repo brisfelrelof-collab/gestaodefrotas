@@ -102,6 +102,7 @@ export default function MonitoramentoPage({ onMenuToggle, onLogout }: Monitorame
   function updateMarkers(positions: GpsLive[], filtro: string) {
     const L = (window as any).L;
     if (!L || !leafletMap.current) return;
+    console.debug("[Monitoramento] updateMarkers ->", positions.length, "positions; filtro=", filtro);
 
     // Esconde/mostra marcadores conforme o filtro
     Object.entries(markersRef.current).forEach(([nome, marker]) => {
@@ -113,6 +114,7 @@ export default function MonitoramentoPage({ onMenuToggle, onLogout }: Monitorame
     });
 
     positions.forEach((pos) => {
+      console.debug("[Monitoramento] processando:", pos.nome, { fix: pos.fix, lat: pos.lat, lng: pos.lng });
       if (!pos.fix) return;
       if (filtro !== "todos" && filtro !== pos.nome) return;
 
@@ -143,9 +145,11 @@ export default function MonitoramentoPage({ onMenuToggle, onLogout }: Monitorame
         </div>`;
 
       if (markersRef.current[pos.nome]) {
+        console.debug("[Monitoramento] atualizando marker:", pos.nome);
         markersRef.current[pos.nome].setLatLng([pos.lat, pos.lng]);
         markersRef.current[pos.nome].setPopupContent(popup);
       } else {
+        console.debug("[Monitoramento] criando marker:", pos.nome);
         const icon = (window as any).L.divIcon({
           className: "",
           html: `
@@ -192,14 +196,13 @@ export default function MonitoramentoPage({ onMenuToggle, onLogout }: Monitorame
     try {
       const res = await fetch(VERCEL_GPS_URL);
       if (!res.ok) return;
-      const data: GpsLive[] = await res.json();
-      if (Array.isArray(data)) {
-        console.debug("[Monitoramento] GPS fetch ->", data.length, "items", data[0]);
-        setGpsLive(data);
-        updateMarkers(data, filtroActual);
-      }
+      const raw = await res.json();
+      const data: GpsLive[] = Array.isArray(raw) ? raw : raw ? [raw] : [];
+      console.debug("[Monitoramento] GPS fetch ->", data.length, "items sample:", data[0]);
+      setGpsLive(data);
+      updateMarkers(data, filtroActual);
     } catch {
-      // Sem dados ainda — normal antes do primeiro POST do ESP32
+      console.error("[Monitoramento] Erro ao buscar /api/gps");
     }
   }
 
