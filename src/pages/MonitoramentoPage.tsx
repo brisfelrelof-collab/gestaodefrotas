@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import PageHeader from "../components/PageHeader";
 import { StatusBadge, EmptyRow } from "../components/StatusBadge";
+import { veiculosStore, alugueresStore, motoristasStore } from "../store";
 import type { Aluguer, Viatura, Motorista } from "../types";
 
 const VERCEL_GPS_URL = "/api/gps";
@@ -24,25 +25,12 @@ const MARKER_COLORS = [
   "#8e44ad", "#2980b9", "#d35400", "#16a085",
 ];
 
-// Lista local de viaturas / meta (sem coordenadas). Usada para preencher filtros
-// e associar proprietários sem depender do Supabase.
-const VEHICLES_META = [
-  { id: "v1", nome: "automovel1", marca: "Toyota", modelo: "Hilux", placa: "A-001", proprietarioId: "proprietario1" },
-  { id: "v2", nome: "automovel2", marca: "Nissan", modelo: "Frontier", placa: "A-002", proprietarioId: "proprietario1" },
-  { id: "v3", nome: "automovel3", marca: "Mitsubishi", modelo: "L200", placa: "A-003", proprietarioId: "proprietario1" },
-  { id: "v4", nome: "automovel4", marca: "Ford", modelo: "Ranger", placa: "B-001", proprietarioId: "proprietario2" },
-  { id: "v5", nome: "automovel5", marca: "Chevrolet", modelo: "S10", placa: "B-002", proprietarioId: "proprietario2" },
-  { id: "v6", nome: "automovel6", marca: "Hyundai", modelo: "H100", placa: "C-001", proprietarioId: "empresa" },
-  { id: "v7", nome: "automovel7", marca: "Isuzu", modelo: "D-Max", placa: "C-002", proprietarioId: "empresa" },
-];
-
 interface MonitoramentoPageProps {
   onMenuToggle: () => void;
   onLogout:     () => void;
-  proprietarioId?: string;
 }
 
-export default function MonitoramentoPage({ onMenuToggle, onLogout, proprietarioId }: MonitoramentoPageProps) {
+export default function MonitoramentoPage({ onMenuToggle, onLogout }: MonitoramentoPageProps) {
   const mapRef        = useRef<HTMLDivElement>(null);
   const leafletMap    = useRef<any>(null);
   const markersRef    = useRef<Record<string, any>>({});
@@ -50,13 +38,11 @@ export default function MonitoramentoPage({ onMenuToggle, onLogout, proprietario
   const timerRef      = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const [operacoes,  setOperacoes]  = useState<Aluguer[]>([]);
+  const [veiculosList, setVeiculosList] = useState<Viatura[]>([]);
+  const [motoristasList, setMotoristasList] = useState<Motorista[]>([]);
   const [espHost,    setEspHost]    = useState("http://192.168.43.134");
   const [espStatus,  setEspStatus]  = useState<string>("");
   const [gpsLive,    setGpsLive]    = useState<GpsLive[]>([]);
-  const [veiculosList, setVeiculosList] = useState<Viatura[]>([]);
-  const [proprietarioNome, setProprietarioNome] = useState<string | null>(null);
-  const [proprietarioVehicleTotal, setProprietarioVehicleTotal] = useState<number | null>(null);
-  const [motoristasList, setMotoristasList] = useState<Motorista[]>([]);
   const [filtroNome, setFiltroNome] = useState<string>("todos");
   const [layer,      setLayer]      = useState("street");
 
@@ -101,7 +87,6 @@ export default function MonitoramentoPage({ onMenuToggle, onLogout, proprietario
     setLayer(newLayer);
     const L = (window as any).L;
     if (!L || !leafletMap.current) return;
-    // remove existing tile layers
     leafletMap.current.eachLayer((l: any) => {
       if (l._url) leafletMap.current.removeLayer(l);
     });
@@ -109,19 +94,10 @@ export default function MonitoramentoPage({ onMenuToggle, onLogout, proprietario
     L.tileLayer(t.url, { attribution: t.attr, maxZoom: 19 }).addTo(leafletMap.current);
   }
 
-  // Atualiza marcadores no mapa
+  // ── Actualiza marcadores no mapa ──────────────────────────────────────────────
   function updateMarkers(positions: GpsLive[], filtro: string) {
     const L = (window as any).L;
     if (!L || !leafletMap.current) return;
-
-    // remove markers for vehicles not present in the current positions list
-    const present = new Set(positions.map((p) => p.nome));
-    Object.keys(markersRef.current).forEach((nome) => {
-      if (!present.has(nome)) {
-        try { leafletMap.current.removeLayer(markersRef.current[nome]); } catch {};
-        delete markersRef.current[nome];
-      }
-    });
 
     // Esconde/mostra marcadores conforme o filtro
     Object.entries(markersRef.current).forEach(([nome, marker]) => {
@@ -166,7 +142,7 @@ export default function MonitoramentoPage({ onMenuToggle, onLogout, proprietario
         markersRef.current[pos.nome].setLatLng([pos.lat, pos.lng]);
         markersRef.current[pos.nome].setPopupContent(popup);
       } else {
-        const icon = L.divIcon({
+        const icon = (window as any).L.divIcon({
           className: "",
           html: `
             <div style="
@@ -183,7 +159,7 @@ export default function MonitoramentoPage({ onMenuToggle, onLogout, proprietario
           iconSize:   [38, 38],
           iconAnchor: [19, 19],
         });
-        markersRef.current[pos.nome] = L.marker([pos.lat, pos.lng], { icon })
+        markersRef.current[pos.nome] = (window as any).L.marker([pos.lat, pos.lng], { icon })
           .bindPopup(popup)
           .addTo(leafletMap.current);
       }
@@ -214,27 +190,8 @@ export default function MonitoramentoPage({ onMenuToggle, onLogout, proprietario
       if (!res.ok) return;
       const data: GpsLive[] = await res.json();
       if (Array.isArray(data)) {
-        let filtered = data;
-        if (proprietarioId) {
-          const propId = proprietarioId as string;
-          // prefer matching by explicit proprietarioId in VEHICLES_META or by owner field in GPS payload
-          filtered = data.filter((d) => {
-            const meta = VEHICLES_META.find((v) => v.nome === d.nome);
-            if (meta && meta.proprietarioId === propId) return true;
-            const ownerRaw = (d as any).proprietario || (d as any).owner || "";
-            if (!ownerRaw) return false;
-            return ownerRaw === propId || ownerRaw === meta?.proprietarioId || ownerRaw === (meta?.proprietarioId ?? "");
-          });
-          setProprietarioNome(propId);
-          const total = VEHICLES_META.filter((v) => v.proprietarioId === propId).length;
-          setProprietarioVehicleTotal(total || filtered.length);
-        } else {
-          setProprietarioNome(null);
-          setProprietarioVehicleTotal(null);
-        }
-
-        setGpsLive(filtered);
-        updateMarkers(filtered, filtroActual);
+        setGpsLive(data);
+        updateMarkers(data, filtroActual);
       }
     } catch {
       // Sem dados ainda — normal antes do primeiro POST do ESP32
@@ -273,10 +230,15 @@ export default function MonitoramentoPage({ onMenuToggle, onLogout, proprietario
     let currentFiltro = "todos";
 
     const init = async () => {
-      // Não usamos Supabase aqui: carregamos metadados locais mínimos
-      setOperacoes([]);
-      setVeiculosList(VEHICLES_META as Viatura[]);
-      setMotoristasList([]);
+      const [asAll, vs, ms] = await Promise.all([
+        alugueresStore.getAll(),
+        veiculosStore.getAll(),
+        motoristasStore.getAll(),
+      ]);
+      const as = (asAll as any[]).filter((a) => a.status === "ativo");
+      setOperacoes(as as Aluguer[]);
+      setVeiculosList(vs as Viatura[]);
+      setMotoristasList(ms as Motorista[]);
 
       const tryInit = () => {
         if ((window as any).L) {
@@ -308,12 +270,12 @@ export default function MonitoramentoPage({ onMenuToggle, onLogout, proprietario
   }, [filtroNome]);
 
   // Nomes disponíveis para o filtro (todos os carros recebidos + operações activas)
-  const nomesDisponiveis = Array.from(
-    new Set([
-      ...VEHICLES_META.map((v) => v.nome),
-      ...gpsLive.map((g: GpsLive) => g.nome),
-    ])
-  );
+    const nomesDisponiveis = Array.from(
+      new Set([
+        ...gpsLive.map((g) => g.nome),
+        ...operacoes.map((a) => veiculosList.find((v) => v.id === ((a as any).veiculoId ?? (a as any).viatura_id ?? ""))?.nome).filter(Boolean) as string[],
+      ])
+    );
 
   return (
     <div>
@@ -334,11 +296,11 @@ export default function MonitoramentoPage({ onMenuToggle, onLogout, proprietario
         }}
       >
         {[
-          { label: proprietarioId ? "Total de Veículos" : "Veículos online",  value: proprietarioId ? (proprietarioVehicleTotal ?? 0) : gpsLive.filter((g) => g.fix).length,               icon: "bi-broadcast-pin",   cor: "#55a0a6" },
+          { label: "Veículos online",  value: gpsLive.filter((g) => g.fix).length,               icon: "bi-broadcast-pin",   cor: "#55a0a6" },
           { label: "Operações activas",value: operacoes.length,                                    icon: "bi-calendar-check",  cor: "#28a745" },
           { label: "Velocidade máx.",  value: gpsLive.length ? Math.max(...gpsLive.map((g) => g.spd)).toFixed(1) + " km/h" : "—", icon: "bi-speedometer2", cor: "#ffc107" },
           { label: "Carros no mapa",   value: Object.keys(markersRef.current).length,              icon: "bi-car-front",       cor: "#e74c3c" },
-        ].map((s: { label: string; value: any; icon: string; cor?: string }) => (
+        ].map((s) => (
           <div className="stat-card" key={s.label} style={{ borderLeftColor: s.cor }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div>
@@ -415,7 +377,7 @@ export default function MonitoramentoPage({ onMenuToggle, onLogout, proprietario
         {/* Badges de carros online */}
         {gpsLive.length > 0 && (
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
-            {gpsLive.map((g: GpsLive) => {
+            {gpsLive.map((g) => {
               const cor = getCorCarro(g.nome);
               return (
                 <button
@@ -515,11 +477,11 @@ export default function MonitoramentoPage({ onMenuToggle, onLogout, proprietario
             </tr>
           </thead>
           <tbody>
-              {operacoes.length === 0 ? (
+            {operacoes.length === 0 ? (
               <EmptyRow cols={6} message="Nenhuma operação activa. Adicione alugueres com status 'Ativo'." />
             ) : (
               operacoes.map((a) => {
-                const veiculoIdSafe = (a as any).viaturaId ?? (a as any).viatura_id ?? "";
+                const veiculoIdSafe = (a as any).veiculoId ?? (a as any).viatura_id ?? "";
                 const veiculo  = veiculosList.find((v) => v.id === veiculoIdSafe);
                 const gpsData  = gpsLive.find((g) => g.nome === veiculo?.nome);
                 const cor      = veiculo?.nome ? getCorCarro(veiculo.nome) : "#aaa";
@@ -609,7 +571,7 @@ export default function MonitoramentoPage({ onMenuToggle, onLogout, proprietario
               Carros recebidos pelo servidor:
             </strong>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              {gpsLive.map((g: GpsLive) => (
+              {gpsLive.map((g) => (
                 <span
                   key={g.nome}
                   style={{
