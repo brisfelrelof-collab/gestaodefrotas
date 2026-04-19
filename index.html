@@ -1,40 +1,760 @@
 <!DOCTYPE html>
-<html lang="pt-AO">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Gestão de Frota</title>
-    <link rel="shortcut icon" href="/logo.png" type="image/png" />
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FleetTrack — Monitoramento GPS</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:       #0a0c10;
+    --surface:  #111318;
+    --panel:    #161a21;
+    --border:   #222730;
+    --accent:   #00e5a0;
+    --accent2:  #0084ff;
+    --warn:     #ff9f43;
+    --danger:   #ff4757;
+    --text:     #e8eaf0;
+    --muted:    #6b7280;
+    --font-head: 'Syne', sans-serif;
+    --font-mono: 'DM Mono', monospace;
+  }
 
-    <!-- Google Fonts: Poppins (mirrors original) -->
-    <link
-      href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap"
-      rel="stylesheet"
-    />
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-    <!-- Bootstrap Icons (mirrors original — all pages use bi-*) -->
-    <link
-      rel="stylesheet"
-      href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css"
-    />
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-mono);
+    height: 100vh;
+    display: grid;
+    grid-template-rows: 56px 1fr;
+    grid-template-columns: 320px 1fr;
+    grid-template-areas:
+      "header header"
+      "sidebar map";
+    overflow: hidden;
+  }
 
-    <!-- Leaflet CSS (used by MonitoramentoPage) -->
-    <link
-      rel="stylesheet"
-      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-    />
-  </head>
-  <body>
-    <div id="root"></div>
+  /* ── HEADER ──────────────────────────────────────────── */
+  header {
+    grid-area: header;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 20px;
+    gap: 16px;
+    z-index: 100;
+  }
+  .logo {
+    font-family: var(--font-head);
+    font-weight: 800;
+    font-size: 18px;
+    letter-spacing: -0.5px;
+    color: var(--accent);
+  }
+  .logo span { color: var(--text); }
+  .header-sep { flex: 1; }
+  .status-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent);
+    animation: blink 1.4s infinite;
+  }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
+  .header-info {
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .header-info strong { color: var(--text); }
+  #clock {
+    font-size: 13px;
+    color: var(--accent);
+    letter-spacing: 1px;
+  }
 
-    <!-- Chart.js (used by DashboardPage — loaded globally so the module can
-         reference window.Chart after the CDN script runs) -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  /* ── SIDEBAR ─────────────────────────────────────────── */
+  aside {
+    grid-area: sidebar;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
 
-    <!-- Leaflet JS (used by MonitoramentoPage) -->
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  .sidebar-section {
+    padding: 14px 16px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .sidebar-title {
+    font-family: var(--font-head);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: var(--muted);
+    text-transform: uppercase;
+    margin-bottom: 10px;
+  }
 
-    <!-- React entry point -->
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
+  /* stats row */
+  .stats-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .stat {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+  }
+  .stat-label { font-size: 10px; color: var(--muted); margin-bottom: 4px; }
+  .stat-value { font-size: 20px; font-weight: 500; color: var(--text); line-height: 1; }
+  .stat-value.green { color: var(--accent); }
+  .stat-value.blue  { color: var(--accent2); }
+  .stat-value.warn  { color: var(--warn); }
+
+  /* vehicle list */
+  .vehicle-list { flex: 1; overflow-y: auto; padding: 8px; }
+  .vehicle-list::-webkit-scrollbar { width: 4px; }
+  .vehicle-list::-webkit-scrollbar-track { background: transparent; }
+  .vehicle-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .vehicle-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin-bottom: 8px;
+    cursor: pointer;
+    transition: border-color .2s, background .2s;
+    position: relative;
+    overflow: hidden;
+  }
+  .vehicle-card::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 3px;
+    background: var(--color, #444);
+    border-radius: 10px 0 0 10px;
+  }
+  .vehicle-card:hover { border-color: var(--color, #555); }
+  .vehicle-card.active { background: color-mix(in srgb, var(--color, #444) 12%, var(--panel)); border-color: var(--color, #555); }
+
+  .vc-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+  .vc-name {
+    font-family: var(--font-head);
+    font-weight: 700;
+    font-size: 14px;
+    color: var(--text);
+  }
+  .vc-badge {
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 20px;
+    font-weight: 500;
+  }
+  .vc-badge.online { background: rgba(0,229,160,.15); color: var(--accent); }
+  .vc-badge.offline { background: rgba(107,114,128,.15); color: var(--muted); }
+
+  .vc-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px 8px;
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .vc-grid span { color: var(--text); }
+  .vc-time { font-size: 10px; color: var(--muted); margin-top: 6px; }
+
+  /* empty state */
+  .empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 120px;
+    color: var(--muted);
+    font-size: 12px;
+    text-align: center;
+    gap: 8px;
+  }
+  .empty-icon { font-size: 32px; opacity: .3; }
+
+  /* filter bar */
+  .filter-bar {
+    display: flex;
+    gap: 6px;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    align-items: center;
+  }
+  .filter-bar input {
+    flex: 1;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    padding: 7px 10px;
+    outline: none;
+  }
+  .filter-bar input:focus { border-color: var(--accent); }
+  .filter-bar input::placeholder { color: var(--muted); }
+  .btn-sm {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    border-radius: 6px;
+    padding: 7px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: .2s;
+    white-space: nowrap;
+    font-family: var(--font-mono);
+  }
+  .btn-sm:hover { border-color: var(--accent); color: var(--accent); }
+  .btn-sm.active { border-color: var(--accent); color: var(--accent); background: rgba(0,229,160,.08); }
+
+  /* ── MAP ─────────────────────────────────────────────── */
+  #map-wrap {
+    grid-area: map;
+    position: relative;
+  }
+  #map { width: 100%; height: 100%; }
+
+  /* map overlay controls */
+  .map-overlay {
+    position: absolute;
+    z-index: 1000;
+  }
+  .layer-picker {
+    top: 12px; right: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .layer-btn {
+    background: rgba(17,19,24,.85);
+    backdrop-filter: blur(8px);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 11px;
+    cursor: pointer;
+    transition: .2s;
+    font-family: var(--font-mono);
+    white-space: nowrap;
+  }
+  .layer-btn:hover, .layer-btn.active { color: var(--accent); border-color: var(--accent); }
+
+  .zoom-controls {
+    bottom: 90px; right: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .zoom-btn {
+    background: rgba(17,19,24,.85);
+    backdrop-filter: blur(8px);
+    border: 1px solid var(--border);
+    color: var(--text);
+    width: 32px; height: 32px;
+    border-radius: 6px;
+    font-size: 16px;
+    cursor: pointer;
+    transition: .2s;
+    display: flex; align-items: center; justify-content: center;
+    line-height: 1;
+  }
+  .zoom-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  .live-bar {
+    bottom: 12px; left: 12px; right: 56px;
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .live-chip {
+    background: rgba(17,19,24,.85);
+    backdrop-filter: blur(8px);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 5px 12px;
+    font-size: 11px;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    transition: .2s;
+  }
+  .live-chip:hover { border-color: #555; }
+  .live-chip .dot { width:7px;height:7px;border-radius:50%;flex-shrink:0; }
+  .live-chip .spd { color: var(--warn); font-weight: 500; }
+
+  /* API endpoint info */
+  .api-box {
+    padding: 10px 16px;
+    border-top: 1px solid var(--border);
+    font-size: 10px;
+    color: var(--muted);
+    background: var(--bg);
+  }
+  .api-box code {
+    color: var(--accent2);
+    font-family: var(--font-mono);
+  }
+  .api-endpoint {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 4px;
+  }
+  .method-badge {
+    font-size: 9px;
+    font-weight: 700;
+    padding: 1px 5px;
+    border-radius: 3px;
+    letter-spacing: .5px;
+  }
+  .method-badge.post { background: rgba(255,159,67,.2); color: var(--warn); }
+  .method-badge.get  { background: rgba(0,132,255,.2); color: var(--accent2); }
+
+  /* Leaflet popup override */
+  .leaflet-popup-content-wrapper {
+    background: var(--surface) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 10px !important;
+    box-shadow: 0 8px 32px rgba(0,0,0,.5) !important;
+    color: var(--text) !important;
+  }
+  .leaflet-popup-tip { background: var(--surface) !important; }
+  .leaflet-popup-content { margin: 14px 16px !important; }
+
+  /* Pulse animation for markers */
+  @keyframes pulse {
+    0%   { transform: scale(1); box-shadow: 0 0 0 0 currentColor; }
+    70%  { transform: scale(1.05); box-shadow: 0 0 0 8px transparent; }
+    100% { transform: scale(1); box-shadow: 0 0 0 0 transparent; }
+  }
+  @keyframes markerPulse {
+    0%,100% { opacity: 1; }
+    50% { opacity: .7; }
+  }
+
+  /* Scrollbar global */
+  ::-webkit-scrollbar { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+</style>
+</head>
+<body>
+
+<!-- ── HEADER ──────────────────────────────────────── -->
+<header>
+  <div class="logo">Fleet<span>Track</span></div>
+  <div class="status-dot" id="connDot"></div>
+  <div class="header-info">
+    <strong id="onlineCount">0</strong> veículos online
+  </div>
+  <div class="header-sep"></div>
+  <div id="clock"></div>
+</header>
+
+<!-- ── SIDEBAR ─────────────────────────────────────── -->
+<aside>
+  <!-- Stats -->
+  <div class="sidebar-section">
+    <div class="sidebar-title">Visão Geral</div>
+    <div class="stats-row">
+      <div class="stat">
+        <div class="stat-label">Online</div>
+        <div class="stat-value green" id="s-online">0</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Vel. máx.</div>
+        <div class="stat-value warn" id="s-maxspd">—</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Satélites</div>
+        <div class="stat-value blue" id="s-sats">—</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Actualiz.</div>
+        <div class="stat-value" id="s-last">—</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Filter -->
+  <div class="filter-bar">
+    <input type="text" id="filterInput" placeholder="Filtrar viatura...">
+    <button class="btn-sm active" id="btnTodos" onclick="setFiltro('todos',this)">Todos</button>
+  </div>
+
+  <!-- Vehicle list -->
+  <div class="vehicle-list" id="vehicleList">
+    <div class="empty-state">
+      <div class="empty-icon">📡</div>
+      <div>Aguardando dados do ESP32...</div>
+    </div>
+  </div>
+
+  <!-- API info -->
+  <div class="api-box">
+    <div>Endpoint da API GPS:</div>
+    <div class="api-endpoint">
+      <span class="method-badge post">POST</span>
+      <code>/api/gps</code>
+      <span>→ envia posição do ESP32</span>
+    </div>
+    <div class="api-endpoint">
+      <span class="method-badge get">GET</span>
+      <code>/api/gps</code>
+      <span>→ lê todas as posições</span>
+    </div>
+  </div>
+</aside>
+
+<!-- ── MAP ─────────────────────────────────────────── -->
+<div id="map-wrap">
+  <div id="map"></div>
+
+  <!-- Layer picker -->
+  <div class="map-overlay layer-picker">
+    <button class="layer-btn active" onclick="setLayer('dark',this)">🌙 Escuro</button>
+    <button class="layer-btn" onclick="setLayer('street',this)">🌍 Mapa</button>
+    <button class="layer-btn" onclick="setLayer('satellite',this)">🛰️ Satélite</button>
+    <button class="layer-btn" onclick="setLayer('topo',this)">🗺️ Topográfico</button>
+  </div>
+
+  <!-- Zoom controls -->
+  <div class="map-overlay zoom-controls">
+    <button class="zoom-btn" onclick="map.zoomIn()">+</button>
+    <button class="zoom-btn" onclick="map.zoomOut()">−</button>
+    <button class="zoom-btn" title="Ver todos" onclick="fitAll()">⊞</button>
+  </div>
+
+  <!-- Live chips -->
+  <div class="map-overlay live-bar" id="liveBar"></div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════
+//  CONFIGURAÇÃO
+// ══════════════════════════════════════════════════════
+const API_URL      = '/api/gps';   // URL da API Vercel
+const POLL_INTERVAL = 3000;        // ms entre cada fetch
+
+// ══════════════════════════════════════════════════════
+//  ESTADO
+// ══════════════════════════════════════════════════════
+let gpsData    = {};    // { nome: { lat, lng, spd, fix, sat, alt, timestamp } }
+let filtroAtual = 'todos';
+let markers    = {};    // { nome: L.marker }
+let circles    = {};    // { nome: L.circle }
+let trails     = {};    // { nome: [L.polyline] }
+let trailPoints = {};   // { nome: [[lat,lng], ...] }
+let colorMap   = {};    // { nome: '#hex' }
+let currentTile;
+
+const COLORS = [
+  '#00e5a0','#0084ff','#ff9f43','#ff4757',
+  '#a29bfe','#fd79a8','#55efc4','#fdcb6e',
+];
+
+function getColor(nome) {
+  if (!colorMap[nome]) {
+    const idx = Object.keys(colorMap).length % COLORS.length;
+    colorMap[nome] = COLORS[idx];
+  }
+  return colorMap[nome];
+}
+
+// ══════════════════════════════════════════════════════
+//  MAP INIT
+// ══════════════════════════════════════════════════════
+const TILES = {
+  dark:      { url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',  attr: '© CARTO' },
+  street:    { url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',             attr: '© OpenStreetMap' },
+  satellite: { url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', attr: '© Esri' },
+  topo:      { url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',               attr: '© OpenTopoMap' },
+};
+
+const map = L.map('map', { zoomControl: false, attributionControl: true })
+  .setView([-8.8383, 13.2344], 13);
+
+currentTile = L.tileLayer(TILES.dark.url, { attribution: TILES.dark.attr, maxZoom: 19 })
+  .addTo(map);
+
+function setLayer(key, btn) {
+  map.removeLayer(currentTile);
+  currentTile = L.tileLayer(TILES[key].url, { attribution: TILES[key].attr, maxZoom: 19 }).addTo(map);
+  document.querySelectorAll('.layer-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+}
+
+function fitAll() {
+  const pts = Object.values(gpsData).filter(d => d.fix).map(d => [d.lat, d.lng]);
+  if (pts.length === 0) { map.setView([-8.8383, 13.2344], 13); return; }
+  if (pts.length === 1) { map.setView(pts[0], 16); return; }
+  map.fitBounds(L.latLngBounds(pts), { padding: [60, 60], maxZoom: 16 });
+}
+
+// ══════════════════════════════════════════════════════
+//  MARKER FACTORY
+// ══════════════════════════════════════════════════════
+function makeIcon(nome, cor, moving) {
+  const pulse = moving ? 'animation:markerPulse 1.2s infinite;' : '';
+  return L.divIcon({
+    className: '',
+    html: `
+      <div style="
+        width:42px;height:42px;border-radius:50%;
+        background:${cor};
+        display:flex;align-items:center;justify-content:center;
+        color:white;font-size:18px;
+        border:3px solid rgba(255,255,255,.3);
+        box-shadow:0 0 0 4px ${cor}44, 0 4px 16px ${cor}66;
+        ${pulse}
+        position:relative;
+      ">
+        🚗
+        <div style="
+          position:absolute;bottom:-16px;left:50%;transform:translateX(-50%);
+          background:${cor};color:white;
+          font-size:8px;font-family:'DM Mono',monospace;font-weight:500;
+          padding:1px 5px;border-radius:10px;white-space:nowrap;
+          box-shadow:0 2px 6px rgba(0,0,0,.4);
+        ">${nome}</div>
+      </div>`,
+    iconSize:   [42, 42],
+    iconAnchor: [21, 21],
+    popupAnchor:[0, -28],
+  });
+}
+
+function buildPopup(d) {
+  const cor = getColor(d.nome);
+  const ago = ((Date.now() - new Date(d.timestamp)) / 1000).toFixed(0);
+  return `
+    <div style="font-family:'DM Mono',monospace;min-width:200px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;border-bottom:1px solid #222730;padding-bottom:10px">
+        <div style="width:12px;height:12px;border-radius:50%;background:${cor};box-shadow:0 0 8px ${cor}"></div>
+        <strong style="color:${cor};font-family:'Syne',sans-serif;font-size:15px">${d.nome}</strong>
+        <span style="margin-left:auto;font-size:10px;color:#6b7280">${ago}s atrás</span>
+      </div>
+      <div style="font-size:12px;line-height:2;color:#9ca3af">
+        <div>Lat <span style="color:#e8eaf0;float:right">${d.lat.toFixed(6)}</span></div>
+        <div>Lng <span style="color:#e8eaf0;float:right">${d.lng.toFixed(6)}</span></div>
+        <div>Velocidade <span style="color:#ff9f43;float:right;font-weight:500">${d.spd.toFixed(1)} km/h</span></div>
+        <div>Satélites <span style="color:#0084ff;float:right">${d.sat}</span></div>
+        <div>Altitude <span style="color:#e8eaf0;float:right">${d.alt.toFixed(0)} m</span></div>
+      </div>
+    </div>`;
+}
+
+// ══════════════════════════════════════════════════════
+//  UPDATE MARKERS
+// ══════════════════════════════════════════════════════
+function updateMarkers() {
+  Object.values(gpsData).forEach(d => {
+    if (!d.fix) return;
+
+    const show = filtroAtual === 'todos' || filtroAtual === d.nome;
+    const cor  = getColor(d.nome);
+    const pos  = [d.lat, d.lng];
+    const popup = buildPopup(d);
+
+    // trail
+    if (!trailPoints[d.nome]) trailPoints[d.nome] = [];
+    const trail = trailPoints[d.nome];
+    if (trail.length === 0 || trail[trail.length-1][0] !== d.lat || trail[trail.length-1][1] !== d.lng) {
+      trail.push(pos);
+      if (trail.length > 80) trail.shift();
+    }
+    if (trails[d.nome]) map.removeLayer(trails[d.nome]);
+    if (show && trail.length > 1) {
+      trails[d.nome] = L.polyline(trail, {
+        color: cor, weight: 2, opacity: .5, dashArray: '4,4'
+      }).addTo(map);
+    }
+
+    // marker
+    const moving = d.spd > 1;
+    if (markers[d.nome]) {
+      markers[d.nome].setLatLng(pos);
+      markers[d.nome].setIcon(makeIcon(d.nome, cor, moving));
+      markers[d.nome].setPopupContent(popup);
+      if (show) markers[d.nome].addTo(map);
+      else map.removeLayer(markers[d.nome]);
+    } else {
+      markers[d.nome] = L.marker(pos, { icon: makeIcon(d.nome, cor, moving) })
+        .bindPopup(popup);
+      if (show) markers[d.nome].addTo(map);
+    }
+
+    // accuracy circle
+    if (circles[d.nome]) map.removeLayer(circles[d.nome]);
+    if (show) {
+      circles[d.nome] = L.circle(pos, {
+        radius: 15, color: cor, fillColor: cor, fillOpacity: .08, weight: 1,
+      }).addTo(map);
+    }
+  });
+}
+
+// ══════════════════════════════════════════════════════
+//  SIDEBAR CARDS
+// ══════════════════════════════════════════════════════
+function renderSidebar() {
+  const list = document.getElementById('vehicleList');
+  const filterVal = document.getElementById('filterInput').value.toLowerCase();
+  const entries = Object.values(gpsData).filter(d =>
+    d.nome.toLowerCase().includes(filterVal)
+  );
+
+  if (entries.length === 0) {
+    list.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">📡</div>
+        <div>${Object.keys(gpsData).length ? 'Nenhum resultado.' : 'Aguardando ESP32...'}</div>
+      </div>`;
+    return;
+  }
+
+  list.innerHTML = entries.map(d => {
+    const cor   = getColor(d.nome);
+    const ago   = ((Date.now() - new Date(d.timestamp)) / 1000).toFixed(0);
+    const isActive = filtroAtual === d.nome;
+    return `
+      <div class="vehicle-card${isActive?' active':''}"
+           style="--color:${cor}"
+           onclick="setFiltro('${d.nome}',null)">
+        <div class="vc-head">
+          <div class="vc-name">${d.nome}</div>
+          <div class="vc-badge ${d.fix?'online':'offline'}">${d.fix?'● ONLINE':'○ SEM FIX'}</div>
+        </div>
+        <div class="vc-grid">
+          <div>Lat<br><span>${d.lat.toFixed(5)}</span></div>
+          <div>Lng<br><span>${d.lng.toFixed(5)}</span></div>
+          <div>Velocidade<br><span style="color:var(--warn)">${d.spd.toFixed(1)} km/h</span></div>
+          <div>Satélites<br><span style="color:var(--accent2)">${d.sat}</span></div>
+        </div>
+        <div class="vc-time">actualizado ${ago}s atrás · alt ${d.alt.toFixed(0)}m</div>
+      </div>`;
+  }).join('');
+}
+
+function renderLiveBar() {
+  const bar = document.getElementById('liveBar');
+  bar.innerHTML = Object.values(gpsData).filter(d => d.fix).map(d => {
+    const cor = getColor(d.nome);
+    return `
+      <div class="live-chip" onclick="setFiltro('${d.nome}',null)">
+        <div class="dot" style="background:${cor};box-shadow:0 0 6px ${cor}"></div>
+        <span>${d.nome}</span>
+        <span class="spd">${d.spd.toFixed(0)} km/h</span>
+      </div>`;
+  }).join('');
+}
+
+function updateStats() {
+  const online = Object.values(gpsData).filter(d => d.fix).length;
+  const spdMax = online ? Math.max(...Object.values(gpsData).filter(d=>d.fix).map(d=>d.spd)) : null;
+  const avgSat = online ? (Object.values(gpsData).filter(d=>d.fix).reduce((a,d)=>a+d.sat,0)/online).toFixed(0) : null;
+
+  document.getElementById('s-online').textContent  = online;
+  document.getElementById('s-maxspd').textContent  = spdMax !== null ? spdMax.toFixed(0)+' km/h' : '—';
+  document.getElementById('s-sats').textContent    = avgSat !== null ? avgSat : '—';
+  document.getElementById('s-last').textContent    = new Date().toLocaleTimeString('pt-AO',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  document.getElementById('onlineCount').textContent = online;
+
+  // header dot color
+  const dot = document.getElementById('connDot');
+  dot.style.background    = online > 0 ? 'var(--accent)' : 'var(--danger)';
+  dot.style.boxShadow     = online > 0 ? '0 0 8px var(--accent)' : '0 0 8px var(--danger)';
+}
+
+// ══════════════════════════════════════════════════════
+//  FILTRO
+// ══════════════════════════════════════════════════════
+function setFiltro(nome, btn) {
+  filtroAtual = nome;
+
+  // button active state
+  document.querySelectorAll('#btnTodos,.btn-sm').forEach(b=>b.classList.remove('active'));
+  if (nome === 'todos' && btn) btn.classList.add('active');
+
+  updateMarkers();
+  renderSidebar();
+
+  // pan to vehicle
+  if (nome !== 'todos' && gpsData[nome]?.fix) {
+    map.setView([gpsData[nome].lat, gpsData[nome].lng], 17, { animate: true });
+  } else if (nome === 'todos') {
+    fitAll();
+  }
+}
+
+document.getElementById('filterInput').addEventListener('input', renderSidebar);
+
+// ══════════════════════════════════════════════════════
+//  FETCH GPS
+// ══════════════════════════════════════════════════════
+async function fetchGPS() {
+  try {
+    const res = await fetch(API_URL);
+    if (!res.ok) return;
+    const raw = await res.json();
+    const list = Array.isArray(raw) ? raw : (raw ? [raw] : []);
+
+    list.forEach(d => { gpsData[d.nome] = d; });
+
+    updateMarkers();
+    renderSidebar();
+    renderLiveBar();
+    updateStats();
+
+    // auto-follow single vehicle
+    if (filtroAtual !== 'todos' && gpsData[filtroAtual]?.fix) {
+      map.panTo([gpsData[filtroAtual].lat, gpsData[filtroAtual].lng], { animate: true });
+    }
+  } catch(e) {
+    console.warn('[GPS fetch]', e.message);
+  }
+}
+
+// ══════════════════════════════════════════════════════
+//  CLOCK
+// ══════════════════════════════════════════════════════
+function updateClock() {
+  document.getElementById('clock').textContent =
+    new Date().toLocaleTimeString('pt-AO', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+// ══════════════════════════════════════════════════════
+//  START
+// ══════════════════════════════════════════════════════
+fetchGPS();
+setInterval(fetchGPS, POLL_INTERVAL);
+</script>
+</body>
 </html>
