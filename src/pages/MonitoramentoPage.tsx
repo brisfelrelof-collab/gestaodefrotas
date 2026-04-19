@@ -190,6 +190,7 @@ export default function MonitoramentoPage({ onMenuToggle, onLogout }: Monitorame
       if (!res.ok) return;
       const data: GpsLive[] = await res.json();
       if (Array.isArray(data)) {
+        console.debug("[Monitoramento] GPS fetch ->", data.length, "items", data[0]);
         setGpsLive(data);
         updateMarkers(data, filtroActual);
       }

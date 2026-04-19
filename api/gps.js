@@ -44,9 +44,6 @@ export default function handler(req, res) {
 
   // ── GET — frontend pede posições ─────────────────────────────────────────────
   if (req.method === "GET") {
-    // Avança a simulação do carro de teste
-    actualizarCarroTeste();
-
     const { nome } = req.query;
 
     // GET /api/gps?nome=viatura1  →  devolve apenas essa viatura
