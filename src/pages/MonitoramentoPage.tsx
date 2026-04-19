@@ -56,7 +56,11 @@ export default function MonitoramentoPage({ onMenuToggle, onLogout }: Monitorame
   // ── Helpers ──────────────────────────────────────────────────────────────────
   function getVeiculoLabel(id: string) {
     const v = veiculosList.find((x) => x.id === id);
-    return v ? `${v.marca} ${v.modelo} (${v.placa})` : id;
+    if (v) return `${v.marca} ${v.modelo} (${v.placa})`;
+    // Se não encontrar pela id, tente usar o campo 'nome' que pode vir do ESP
+    const byNome = veiculosList.find((x) => x.nome === id);
+    if (byNome) return `${byNome.marca} ${byNome.modelo} (${byNome.placa})`;
+    return id;
   }
   function getMotoristaNome(id?: string) {
     if (!id) return "—";
@@ -274,6 +278,7 @@ export default function MonitoramentoPage({ onMenuToggle, onLogout }: Monitorame
     const nomesDisponiveis = Array.from(
       new Set([
         ...gpsLive.map((g) => g.nome),
+        ...veiculosList.map((v) => v.nome).filter(Boolean) as string[],
         ...operacoes.map((a) => veiculosList.find((v) => v.id === ((a as any).veiculoId ?? (a as any).viatura_id ?? ""))?.nome).filter(Boolean) as string[],
       ])
     );
