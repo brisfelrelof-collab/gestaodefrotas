@@ -48,7 +48,6 @@ export default function MonitoramentoPage({ onMenuToggle, onLogout }: Monitorame
   const [espHost,        setEspHost]        = useState("http://192.168.43.134");
   const [espStatus,      setEspStatus]      = useState<string>("");
   const [gpsLive,        setGpsLive]        = useState<GpsLive[]>([]);
-  const [filtroNome,     setFiltroNome]     = useState<string>("todos");
   const [layer,          setLayer]          = useState("street");
 
   const TILES: Record<string, { url: string; attr: string }> = {
@@ -98,19 +97,13 @@ export default function MonitoramentoPage({ onMenuToggle, onLogout }: Monitorame
   }
 
   // ── Actualiza marcadores — inclui viaturas offline ───────────────────────────
-  function updateMarkers(positions: GpsLive[], filtro: string) {
+  // Mostra todas as posições recebidas (independentemente do nome)
+  function updateMarkers(positions: GpsLive[]) {
     const L = (window as any).L;
     if (!L || !leafletMap.current) return;
 
-    // Oculta/mostra por filtro
-    Object.entries(markersRef.current).forEach(([nome, marker]) => {
-      if (filtro === "todos" || filtro === nome) marker.addTo(leafletMap.current);
-      else leafletMap.current.removeLayer(marker);
-    });
-
     positions.forEach((pos) => {
-      if (!pos.fix) return;
-      if (filtro !== "todos" && filtro !== pos.nome) return;
+      if (pos.lat === undefined || pos.lng === undefined) return;
 
       const cor         = getCorCarro(pos.nome);
       const isOffline   = !pos.online;
@@ -145,7 +138,6 @@ export default function MonitoramentoPage({ onMenuToggle, onLogout }: Monitorame
           ${offlineBadge}
         </div>`;
 
-      // Ícone diferenciado: offline = cinzento + label
       const iconHtml = isOffline
         ? `<div style="
               position:relative;
@@ -179,7 +171,6 @@ export default function MonitoramentoPage({ onMenuToggle, onLogout }: Monitorame
       if (markersRef.current[pos.nome]) {
         markersRef.current[pos.nome].setLatLng([pos.lat, pos.lng]);
         markersRef.current[pos.nome].setPopupContent(popup);
-        // Actualiza ícone (online <-> offline pode mudar)
         markersRef.current[pos.nome].setIcon(
           L.divIcon({ className: "", html: iconHtml, iconSize: [38, 38], iconAnchor: [19, 38] })
         );
@@ -190,34 +181,38 @@ export default function MonitoramentoPage({ onMenuToggle, onLogout }: Monitorame
           .addTo(leafletMap.current);
       }
     });
+
+    // Remove marcadores que não aparecem mais nas posições recebidas
+    const currentNames = new Set(positions.map((p) => p.nome));
+    Object.keys(markersRef.current).forEach((name) => {
+      if (!currentNames.has(name)) {
+        try { leafletMap.current.removeLayer(markersRef.current[name]); } catch {}
+        delete markersRef.current[name];
+      }
+    });
   }
 
-  function centrarNoFiltro(positions: GpsLive[], filtro: string) {
+  function centrarTodos(positions: GpsLive[]) {
     if (!leafletMap.current) return;
-    if (filtro === "todos") {
-      const pts = positions.filter((p) => p.fix);
-      if (pts.length > 0) {
-        const L = (window as any).L;
-        leafletMap.current.fitBounds(
-          L.latLngBounds(pts.map((p) => [p.lat, p.lng])),
-          { padding: [50, 50], maxZoom: 16 }
-        );
-      }
-    } else {
-      const pos = positions.find((p) => p.nome === filtro && p.fix);
-      if (pos) leafletMap.current.setView([pos.lat, pos.lng], 16);
+    const pts = positions.filter((p) => p.lat !== undefined && p.lng !== undefined);
+    if (pts.length > 0) {
+      const L = (window as any).L;
+      leafletMap.current.fitBounds(
+        L.latLngBounds(pts.map((p) => [p.lat, p.lng])),
+        { padding: [50, 50], maxZoom: 16 }
+      );
     }
   }
 
   // ── Busca posições da API Neon ───────────────────────────────────────────────
-  async function fetchVercelGps(filtroActual: string) {
+  async function fetchVercelGps() {
     try {
       const res = await fetch(VERCEL_GPS_URL);
       if (!res.ok) return;
       const raw = await res.json();
       const data: GpsLive[] = Array.isArray(raw) ? raw : raw ? [raw] : [];
       setGpsLive(data);
-      updateMarkers(data, filtroActual);
+      updateMarkers(data);
     } catch {
       console.error("[Monitoramento] Erro ao buscar /api/gps");
     }
@@ -237,16 +232,10 @@ export default function MonitoramentoPage({ onMenuToggle, onLogout }: Monitorame
     }
   }
 
-  function handleFiltroChange(novoFiltro: string) {
-    setFiltroNome(novoFiltro);
-    updateMarkers(gpsLive, novoFiltro);
-    centrarNoFiltro(gpsLive, novoFiltro);
-  }
+  // filtro removido: mostramos todas posições por defeito
 
   // ── Lifecycle ────────────────────────────────────────────────────────────────
   useEffect(() => {
-    let currentFiltro = "todos";
-
     const init = async () => {
       const [asAll, vs, ms] = await Promise.all([
         alugueresStore.getAll(),
@@ -260,29 +249,21 @@ export default function MonitoramentoPage({ onMenuToggle, onLogout }: Monitorame
       const tryInit = () => {
         if ((window as any).L) {
           initMap();
-          fetchVercelGps(currentFiltro);
+          fetchVercelGps();
         } else {
           setTimeout(tryInit, 200);
         }
       };
       tryInit();
 
-      timerRef.current = setInterval(() => fetchVercelGps(currentFiltro), 3000);
+      timerRef.current = setInterval(() => fetchVercelGps(), 3000);
     };
 
     void init();
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, []);
 
-  useEffect(() => {
-    updateMarkers(gpsLive, filtroNome);
-    centrarNoFiltro(gpsLive, filtroNome);
-  }, [filtroNome]);
-
-  const nomesDisponiveis = Array.from(new Set([
-    ...gpsLive.map((g) => g.nome),
-    ...veiculosList.map((v) => v.nome).filter(Boolean) as string[],
-  ]));
+  // sempre mostramos todas as posições (sem filtro)
 
   const onlineCount  = gpsLive.filter((g) => g.online).length;
   const offlineCount = gpsLive.filter((g) => !g.online).length;
@@ -323,20 +304,6 @@ export default function MonitoramentoPage({ onMenuToggle, onLogout }: Monitorame
             <i className="bi bi-geo-alt" /> Localização em Tempo Real
           </h5>
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <i className="bi bi-funnel" style={{ color: "var(--primary-color)", fontSize: 14 }} />
-              <select
-                className="form-select"
-                style={{ width: 170, height: 36, fontSize: 13 }}
-                value={filtroNome}
-                onChange={(e) => handleFiltroChange(e.target.value)}
-              >
-                <option value="todos">Todos os carros</option>
-                {nomesDisponiveis.map((n) => (
-                  <option key={n} value={n}>{n}</option>
-                ))}
-              </select>
-            </div>
             <input
               className="form-control"
               style={{ width: 200, height: 36, fontSize: 12 }}
@@ -360,39 +327,7 @@ export default function MonitoramentoPage({ onMenuToggle, onLogout }: Monitorame
           </div>
         )}
 
-        {/* Badges de carros */}
-        {gpsLive.length > 0 && (
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
-            {gpsLive.map((g) => {
-              const cor = g.online ? getCorCarro(g.nome) : "#9e9e9e";
-              return (
-                <button
-                  key={g.nome}
-                  onClick={() => handleFiltroChange(g.nome === filtroNome ? "todos" : g.nome)}
-                  style={{
-                    background: filtroNome === g.nome ? cor : "#f0f0f0",
-                    color:      filtroNome === g.nome ? "white" : "#444",
-                    border:     `2px solid ${cor}`,
-                    padding:    "4px 12px",
-                    borderRadius: 20,
-                    fontSize: 12,
-                    cursor: "pointer",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 5,
-                    fontFamily: "'Poppins',sans-serif",
-                    opacity: g.online ? 1 : 0.7,
-                  }}
-                >
-                  <span style={{ width: 8, height: 8, borderRadius: "50%", background: filtroNome === g.nome ? "white" : cor, display: "inline-block" }} />
-                  {g.nome}
-                  {!g.online && <span style={{ fontSize: 9, background: "#f44336", color: "white", padding: "1px 4px", borderRadius: 4 }}>OFFLINE</span>}
-                  {g.online && <>&nbsp;{g.spd.toFixed(0)} km/h</>}
-                </button>
-              );
-            })}
-          </div>
-        )}
+        {/* seleção removida — mostramos todas as posições no mapa */}
 
         {/* Mapa Leaflet */}
         <div className="map-container" id="map" ref={mapRef}>
@@ -410,7 +345,7 @@ export default function MonitoramentoPage({ onMenuToggle, onLogout }: Monitorame
           <div className="map-controls">
             <button onClick={() => leafletMap.current?.zoomIn()}  title="Zoom +"><i className="bi bi-plus-lg" /></button>
             <button onClick={() => leafletMap.current?.zoomOut()} title="Zoom -"><i className="bi bi-dash-lg" /></button>
-            <button onClick={() => { setFiltroNome("todos"); centrarNoFiltro(gpsLive, "todos"); }} title="Ver todos"><i className="bi bi-fullscreen" /></button>
+            <button onClick={() => centrarTodos(gpsLive)} title="Ver todos"><i className="bi bi-fullscreen" /></button>
             <button onClick={() => leafletMap.current?.setView([-8.8383, 13.2344], 13)} title="Resetar"><i className="bi bi-arrow-repeat" /></button>
           </div>
         </div>
