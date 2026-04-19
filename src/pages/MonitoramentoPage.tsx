@@ -57,6 +57,9 @@ export default function MonitoramentoPage({ onMenuToggle, onLogout }: Monitorame
     topo:      { url: "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png",                                                         attr: "© OpenTopoMap" },
   };
 
+  // indicador: existe pelo menos um fix recebido de qualquer ESP?
+  const hasAnyFix = gpsLive.some((g) => g.fix);
+
   // ── Helpers ─────────────────────────────────────────────────────────────────
   function getVeiculoLabel(id: string) {
     const v = veiculosList.find((x) => x.id === id) ??
@@ -300,8 +303,20 @@ export default function MonitoramentoPage({ onMenuToggle, onLogout }: Monitorame
       {/* ── Mapa ── */}
       <div className="table-container" style={{ marginBottom: 20 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 10 }}>
-          <h5 style={{ color: "var(--primary-color)", margin: 0 }}>
+          <h5 style={{ color: "var(--primary-color)", margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
             <i className="bi bi-geo-alt" /> Localização em Tempo Real
+            <span
+              title={hasAnyFix ? 'Recebendo fix de pelo menos um ESP' : 'Sem fix recebido'}
+              style={{
+                width: 12,
+                height: 12,
+                borderRadius: '50%',
+                background: hasAnyFix ? '#4caf50' : '#9e9e9e',
+                boxShadow: hasAnyFix ? '0 0 8px rgba(76,175,80,0.8)' : 'none',
+                display: 'inline-block',
+                marginLeft: 6,
+              }}
+            />
           </h5>
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <input
