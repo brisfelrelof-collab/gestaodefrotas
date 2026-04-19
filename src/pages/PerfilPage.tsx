@@ -1,10 +1,8 @@
 // src/pages/PerfilPage.tsx
 import { useEffect, useRef, useState } from "react";
 import PageHeader from "../components/PageHeader";
-import { supabase } from "../supabase/client";
-import { getUserProfile, resetPassword } from "../supabase/auth";
-import { usersDB } from "../supabase/database";
-import { uploadProfilePhoto, fileToBase64 } from "../supabase/storage";
+import { getUserProfile, resetPassword } from "../db/auth";
+import { usersDB } from "../db/database";
 import { useAuth } from "../hooks/useAuth";
 import type { AppUser } from "../types";
 
@@ -16,6 +14,15 @@ const ROLE_LABEL: Record<string, string> = {
   motorista:    "Motorista",
   usuario:      "Cliente",
 };
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload  = () => resolve(r.result as string);
+    r.onerror = reject;
+    r.readAsDataURL(file);
+  });
+}
 
 export default function PerfilPage({ onMenuToggle, onLogout }: Props) {
   const { user: authUser } = useAuth();
@@ -29,11 +36,15 @@ export default function PerfilPage({ onMenuToggle, onLogout }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    supabase.auth.getSession().then(async ({ data }) => {
-      const userId = data.session?.user?.id ?? "";
+    // Lê sessão do localStorage (sem Supabase Auth)
+    try {
+      const raw = localStorage.getItem("local_auth_user");
+      const userId = raw ? (JSON.parse(raw)?.id ?? "") : "";
       setUid(userId);
       if (userId) load(userId);
-    });
+    } catch {
+      // sem sessão
+    }
   }, []);
 
   const load = async (userId: string) => {
@@ -57,16 +68,25 @@ export default function PerfilPage({ onMenuToggle, onLogout }: Props) {
     setSaving(true);
     try {
       let foto_url = profile?.foto_url ?? "";
-      const role = profile?.role;
 
-      if (foto && uid && (role === "proprietario" || role === "motorista")) {
-        const storageRole = role === "proprietario" ? "proprietarios" : "motoristas";
-        const up = await uploadProfilePhoto(uid, storageRole, foto);
-        if (up.ok) foto_url = up.url!;
+      // Sem storage externo: guarda base64 directamente
+      if (foto) {
+        foto_url = await fileToBase64(foto);
       }
 
       await usersDB.update(uid, { nome: form.nome, telefone: form.telefone, foto_url });
       await load(uid);
+
+      // Actualiza nome na sessão local
+      try {
+        const raw = localStorage.getItem("local_auth_user");
+        if (raw) {
+          const sess = JSON.parse(raw);
+          sess.nome = form.nome;
+          localStorage.setItem("local_auth_user", JSON.stringify(sess));
+        }
+      } catch {}
+
       showToast("Perfil actualizado com sucesso!");
     } finally {
       setSaving(false);
@@ -77,7 +97,7 @@ export default function PerfilPage({ onMenuToggle, onLogout }: Props) {
     if (!profile?.email) return;
     if (!confirm(`Enviar email de reset de senha para ${profile.email}?`)) return;
     const r = await resetPassword(profile.email);
-    showToast(r.ok ? "Email de reset enviado!" : r.error ?? "Erro.");
+    showToast(r.ok ? "Reset solicitado!" : r.error ?? "Erro.");
   };
 
   if (!profile) return (
@@ -109,9 +129,7 @@ export default function PerfilPage({ onMenuToggle, onLogout }: Props) {
               }
             </div>
             <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleFoto} />
-            {(profile.role === "proprietario" || profile.role === "motorista") && (
-              <div style={{ fontSize: 12, color: "#888", marginTop: 6 }}>Clique para alterar a foto</div>
-            )}
+            <div style={{ fontSize: 12, color: "#888", marginTop: 6 }}>Clique para alterar a foto</div>
             <div style={{ marginTop: 8 }}>
               <span style={{ fontSize: 12, padding: "3px 12px", borderRadius: 20, fontWeight: 600, background: "linear-gradient(135deg,#55a0a6,#3d7a7f)", color: "white" }}>
                 {ROLE_LABEL[profile.role] ?? profile.role}
@@ -152,9 +170,9 @@ export default function PerfilPage({ onMenuToggle, onLogout }: Props) {
         <div className="card-box" style={{ marginTop: 16 }}>
           <h6 style={{ color: "#888", marginBottom: 12 }}>Informações da Conta</h6>
           {[
-            { label: "ID",           value: profile.id },
-            { label: "Tipo de Conta",value: ROLE_LABEL[profile.role] ?? profile.role },
-            { label: "Status",       value: profile.status ?? "ativo" },
+            { label: "ID",            value: profile.id },
+            { label: "Tipo de Conta", value: ROLE_LABEL[profile.role] ?? profile.role },
+            { label: "Status",        value: profile.status ?? "ativo" },
           ].map((row) => (
             <div key={row.label} style={{ display: "flex", justifyContent: "space-between", fontSize: 14, padding: "8px 0", borderBottom: "1px solid #f5f5f5" }}>
               <span style={{ color: "#888" }}>{row.label}</span>

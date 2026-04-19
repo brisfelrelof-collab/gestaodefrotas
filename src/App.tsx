@@ -85,10 +85,10 @@ export default function App() {
     // Proprietário — only their own data
     if (role === "proprietario") {
       switch (page) {
-        case "monitoramento": return <MonitoramentoPage {...pageProps} proprietarioId={user.uid} />;
+        case "monitoramento": return <MonitoramentoPage {...pageProps} />;
         case "financas":      return <FinancasPage {...pageProps} proprietarioId={user.uid} />;
         case "perfil":        return <PerfilPage {...pageProps} />;
-        default:              return <MonitoramentoPage {...pageProps} proprietarioId={user.uid} />;
+        default:              return <MonitoramentoPage {...pageProps} />;
       }
     }
 

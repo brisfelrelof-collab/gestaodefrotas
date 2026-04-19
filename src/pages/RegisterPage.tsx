@@ -1,6 +1,6 @@
 // src/pages/RegisterPage.tsx
 import { useState } from "react";
-import { supabaseRegister } from "../supabase/auth";
+import { supabaseRegister } from "../db/auth";
 import { usuariosClientesStore } from "../store";
 
 interface RegisterPageProps {

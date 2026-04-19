@@ -3,8 +3,7 @@ import { useEffect, useState } from "react";
 import PageHeader from "../components/PageHeader";
 import { StatusBadge, EmptyRow } from "../components/StatusBadge";
 import { servicosStore, veiculosStore } from "../store";
-import { supabase } from "../supabase/client";
-import { getUserProfile } from "../supabase/auth";
+import { getUserProfile } from "../db/auth";
 import type { Servico, TipoServicoPedido, Viatura } from "../types";
 
 interface Props { onMenuToggle: () => void; onLogout: () => void; }
@@ -32,15 +31,20 @@ export default function SolicitarPage({ onMenuToggle, onLogout }: Props) {
   const [uid,       setUid]       = useState("");
 
   useEffect(() => {
-    supabase.auth.getSession().then(async ({ data }) => {
-      const userId = data.session?.user?.id ?? "";
+    // Lê sessão do localStorage (sem Supabase Auth)
+    try {
+      const raw    = localStorage.getItem("local_auth_user");
+      const userId = raw ? (JSON.parse(raw)?.id ?? "") : "";
       setUid(userId);
       if (userId) {
-        const profile = await getUserProfile(userId);
-        setUserName(profile?.nome ?? "");
+        getUserProfile(userId).then((profile) => {
+          setUserName(profile?.nome ?? "");
+        });
         loadData(userId);
       }
-    });
+    } catch {
+      // sem sessão
+    }
   }, []);
 
   const loadData = async (userId: string) => {
@@ -50,14 +54,14 @@ export default function SolicitarPage({ onMenuToggle, onLogout }: Props) {
       veiculosStore.getAll(),
     ]);
     setHistorico(sv);
-    setViaturas(vi.filter((v) => v.status === "disponivel"));
+    setViaturas((vi as (Viatura & { id: string })[]).filter((v: Viatura) => v.status === "disponivel"));
     setLoading(false);
   };
 
   const handleSolicitar = async () => {
     if (!form.origemNome.trim()) { alert("Informe o local de origem."); return; }
 
-    const viatura = viaturas.find((v) =>
+    const viatura = viaturas.find((v: Viatura) =>
       form.tipo === "transporte" ? v.tipo_servico === "carga" :
       form.tipo === "aluguer"    ? v.tipo_servico === "aluguer" :
       v.tipo_servico === "taxi"
@@ -134,10 +138,10 @@ export default function SolicitarPage({ onMenuToggle, onLogout }: Props) {
       {/* Stats */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))", gap: 12, marginBottom: 24 }}>
         {[
-          { label: "Pendentes",  value: pendentes,  color: "#f39c12" },
-          { label: "Em Curso",   value: emCurso,    color: "#2980b9" },
-          { label: "Concluídos", value: concluidos, color: "#27ae60" },
-          { label: "Total",      value: historico.length, color: "#555" },
+          { label: "Pendentes",  value: pendentes,        color: "#f39c12" },
+          { label: "Em Curso",   value: emCurso,          color: "#2980b9" },
+          { label: "Concluídos", value: concluidos,       color: "#27ae60" },
+          { label: "Total",      value: historico.length, color: "#555"    },
         ].map((s) => (
           <div className="stat-card" key={s.label} style={{ textAlign: "center" }}>
             <h3 style={{ color: s.color, marginBottom: 4 }}>{s.value}</h3>

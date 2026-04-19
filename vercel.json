@@ -1,14 +1,22 @@
 {
-  "buildCommand": "npm run build",
-  "outputDirectory": "dist",
+  "buildCommand":   "npm run build",
+  "outputDirectory":"dist",
   "installCommand": "npm install --include=dev",
-  "framework": "vite",
+  "framework":      "vite",
   "build": {
-    "env": {
-      "NPM_CONFIG_PRODUCTION": "false"
-    }
+    "env": { "NPM_CONFIG_PRODUCTION": "false" }
+  },
+  "functions": {
+    "api/gps.js": { "maxDuration": 10 },
+    "api/db.js":  { "maxDuration": 10 },
+    "api/auth.js":{ "maxDuration": 10 }
   },
   "rewrites": [
-    { "source": "/(.*)", "destination": "/index.html" }
-  ]
+    { "source": "/api/(.*)", "destination": "/api/$1" },
+    { "source": "/(.*)",     "destination": "/index.html" }
+  ],
+  "env": {
+    "DATABASE_URL": "@database_url",
+    "AUTH_SALT":    "@auth_salt"
+  }
 }

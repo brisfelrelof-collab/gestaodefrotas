@@ -3,13 +3,12 @@
 // Mantém a mesma API pública das páginas existentes.
 // localStorage foi completamente substituído por Supabase.
 
-import { supabase } from "../supabase/client";
-import { supabaseLogin, supabaseLogout, getUserProfile } from "../supabase/auth";
+import { supabaseLogin, supabaseLogout, getUserProfile, getCurrentUid } from "../db/auth";
 import {
   viaturasDB, motoristasDB, proprietariosDB,
   servicosDB, transacoesDB, usuariosClientesDB,
   rotasDB, usersDB,
-} from "../supabase/database";
+} from "../db/database";
 import type {
   AppUser, Viatura, Motorista, Rota, Servico,
   Proprietario, Transacao, UsuarioCliente,
@@ -27,11 +26,10 @@ export async function authLogout(): Promise<void> {
 }
 
 export function authCurrentUser(): AppUser | null {
-  // Síncrono — só devolve dados básicos da sessão local Supabase
-  // Para dados completos do perfil usa o hook useAuth()
-  const session = (supabase as any).auth._session ?? null;
-  if (!session?.user) return null;
-  return { id: session.user.id, uid: session.user.id, email: session.user.email ?? "", role: "superadmin" };
+  // Síncrono — devolve dados básicos da sessão local gerida em `src/db/auth`
+  const uid = getCurrentUid();
+  if (!uid) return null;
+  return { id: uid, uid, email: "", role: "superadmin" };
 }
 
 // ─── Validação de placa angolana (inalterado) ─────────────────────────────────
@@ -111,7 +109,7 @@ export const servicosStore = {
 export const alugueresStore = {
   getAll: async () => {
     const sv = await servicosDB.getAll();
-    return sv.map((s) => ({
+    return sv.map((s: Servico & { id: string }) => ({
       ...s,
       // Normaliza campos camelCase esperados pela AlugueresPage
       veiculoId:       s.viatura_id,
@@ -183,7 +181,7 @@ export const rotasStore = {
   getAll: async (): Promise<(Rota & { id: string })[]> => {
     const rows = await rotasDB.getAll();
     // Normaliza para camelCase esperado por RotasPage
-    return rows.map((r) => ({
+    return rows.map((r: Rota & { id: string }) => ({
       ...r,
       nomeRota:      r.nome_rota ?? (r as any).nomeRota ?? "",
       tempoEstimado: r.tempo_estimado ?? (r as any).tempoEstimado ?? "",

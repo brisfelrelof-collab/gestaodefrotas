@@ -1,11 +1,11 @@
-// src/pages/ProprietariosPage.tsx
+// src/pages/ProprietariosPage.tsx  —  versão Neon PostgreSQL
+// Novidade: contagem de viaturas vai directamente à tabela `viaturas` do DB
+
 import { useEffect, useRef, useState } from "react";
 import PageHeader from "../components/PageHeader";
 import { StatusBadge, Modal, EmptyRow } from "../components/StatusBadge";
-import { proprietariosStore } from "../store";
-import { supabaseRegister, resetPassword } from "../supabase/auth";
-import { uploadProfilePhoto, fileToBase64 } from "../supabase/storage";
-import { usersDB } from "../supabase/database";
+import { proprietariosStore, veiculosStore } from "../store";
+import { supabaseRegister, resetPassword } from "../db/auth";
 import type { Proprietario } from "../types";
 
 interface Props { onMenuToggle: () => void; onLogout: () => void; }
@@ -14,8 +14,18 @@ const EMPTY: Omit<Proprietario, "id"> = {
   nome: "", nif: "", email: "", contacto: "", morada: "", status: "ativo",
 };
 
+// Converte File para base64 (preview local)
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result as string);
+    r.onerror = reject;
+    r.readAsDataURL(file);
+  });
+}
+
 export default function ProprietariosPage({ onMenuToggle, onLogout }: Props) {
-  const [lista,   setLista]   = useState<(Proprietario & { id: string })[]>([]);
+  const [lista,   setLista]   = useState<(Proprietario & { id: string; vehicleCount?: number })[]>([]);
   const [search,  setSearch]  = useState("");
   const [modal,   setModal]   = useState(false);
   const [form,    setForm]    = useState<Partial<Proprietario & { senha?: string }>>({ ...EMPTY });
@@ -28,40 +38,23 @@ export default function ProprietariosPage({ onMenuToggle, onLogout }: Props) {
 
   const reload = async () => {
     setLoading(true);
-    const props = await proprietariosStore.getAll();
-    // fetch in-memory vehicle positions to count vehicles per proprietor
-    let gpsList: any[] = [];
-    try {
-      const res = await fetch('/api/gps');
-      if (res.ok) {
-        const data = await res.json();
-        if (Array.isArray(data)) gpsList = data;
-      }
-    } catch (e) { /* ignore */ }
+    const [props, viaturas] = await Promise.all([
+      proprietariosStore.getAll(),
+      veiculosStore.getAll(),
+    ]);
 
-    // For each proprietor compute count by matching multiple heuristics:
-    // - owner string equals proprietor.id
-    // - normalized owner string equals normalized nome
-    // - owner contains nome or nome contains owner (to match 'proprietario1' vs 'Proprietario 1')
-    const normalize = (s: string) => s.replace(/\s+/g, '').toLowerCase();
-    const enriched = props.map((p) => {
-      const pid = p.id;
-      const pname = p.nome ?? "";
-      const pn = normalize(pname);
-      let count = 0;
-      for (const v of gpsList) {
-        const ownerRaw = (v.proprietario || v.owner || v.proprietario_id || v.proprietarioId || "") + "";
-        const on = normalize(ownerRaw);
-        if (!ownerRaw) continue;
-        if (ownerRaw === pid) count++;
-        else if (on === pn) count++;
-        else if (on.includes(pn) || pn.includes(on)) count++;
-      }
-      return { ...p, vehicleCount: count };
-    });
+    // Conta viaturas por proprietário usando a relação proprietario_id
+    const enriched = props.map((p: Proprietario & { id: string }) => ({
+      ...p,
+      vehicleCount: viaturas.filter(
+        (v: import("../types").Viatura & { id: string }) => v.proprietario_id === p.id || (v as any).proprietarioId === p.id
+      ).length,
+    }));
+
     setLista(enriched as any);
     setLoading(false);
   };
+
   useEffect(() => { reload(); }, []);
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(""), 3500); };
@@ -92,7 +85,7 @@ export default function ProprietariosPage({ onMenuToggle, onLogout }: Props) {
   const handleResetSenha = async (p: Proprietario) => {
     if (!confirm(`Enviar email de reset de senha para ${p.email}?`)) return;
     const result = await resetPassword(p.email);
-    showToast(result.ok ? `Email enviado para ${p.email}` : result.error ?? "Erro ao enviar email.");
+    showToast(result.ok ? `Reset solicitado para ${p.email}` : result.error ?? "Erro ao processar reset.");
   };
 
   const handleSave = async () => {
@@ -113,7 +106,6 @@ export default function ProprietariosPage({ onMenuToggle, onLogout }: Props) {
       let foto_url = form.foto_url ?? "";
 
       if (!form.id) {
-        // Cria conta Supabase Auth
         const reg = await supabaseRegister({
           email:    email!,
           password: form.senha!,
@@ -125,10 +117,9 @@ export default function ProprietariosPage({ onMenuToggle, onLogout }: Props) {
         uid = reg.uid!;
       }
 
-      // Upload foto se seleccionada
+      // Upload foto (base64 simples — sem storage externo)
       if (foto && uid) {
-        const up = await uploadProfilePhoto(uid, "proprietarios", foto);
-        if (up.ok) foto_url = up.url!;
+        foto_url = await fileToBase64(foto);
       }
 
       const data: Omit<Proprietario, "id"> = {
@@ -143,7 +134,6 @@ export default function ProprietariosPage({ onMenuToggle, onLogout }: Props) {
 
       if (form.id) {
         await proprietariosStore.update(form.id, data);
-        await usersDB.update(uid, { nome: nome!, foto_url });
       } else {
         await proprietariosStore.set(uid, data);
       }
@@ -183,11 +173,13 @@ export default function ProprietariosPage({ onMenuToggle, onLogout }: Props) {
         </button>
       </div>
 
-      <div className="stats-row" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 16, marginBottom: 20 }}>
+      {/* Estatísticas */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 16, marginBottom: 20 }}>
         {[
-          { label: "Total",    value: lista.length },
-          { label: "Activos",  value: lista.filter((p) => p.status === "ativo").length },
-          { label: "Inativos", value: lista.filter((p) => p.status === "inativo").length },
+          { label: "Total",           value: lista.length },
+          { label: "Activos",         value: lista.filter((p) => p.status === "ativo").length },
+          { label: "Inativos",        value: lista.filter((p) => p.status === "inativo").length },
+          { label: "Total viaturas",  value: lista.reduce((acc, p) => acc + (p.vehicleCount ?? 0), 0) },
         ].map((s) => (
           <div className="stat-card" key={s.label}><h6 className="text-muted">{s.label}</h6><h3>{s.value}</h3></div>
         ))}
@@ -197,13 +189,23 @@ export default function ProprietariosPage({ onMenuToggle, onLogout }: Props) {
         <div className="table-responsive">
           <table className="table-custom">
             <thead>
-              <tr><th>Foto</th><th>Nome</th><th>NIF / Bilhete</th><th>Email</th><th>Contacto</th><th>Morada</th><th>Viaturas</th><th>Status</th><th style={{ width: 140 }}>Ações</th></tr>
+              <tr>
+                <th>Foto</th>
+                <th>Nome</th>
+                <th>NIF / Bilhete</th>
+                <th>Email</th>
+                <th>Contacto</th>
+                <th>Morada</th>
+                <th title="Nº de viaturas registadas na frota">🚗 Viaturas</th>
+                <th>Status</th>
+                <th style={{ width: 140 }}>Ações</th>
+              </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={8} style={{ textAlign: "center", padding: 24 }}><span className="loading-spinner" /></td></tr>
+                <tr><td colSpan={9} style={{ textAlign: "center", padding: 24 }}><span className="loading-spinner" /></td></tr>
               ) : filtered.length === 0 ? (
-                <EmptyRow cols={8} message="Nenhum proprietário cadastrado." />
+                <EmptyRow cols={9} message="Nenhum proprietário cadastrado." />
               ) : filtered.map((p) => (
                 <tr key={p.id}>
                   <td>
@@ -219,12 +221,24 @@ export default function ProprietariosPage({ onMenuToggle, onLogout }: Props) {
                   <td style={{ color: "var(--primary-color)" }}>{p.email}</td>
                   <td>{p.contacto}</td>
                   <td><small>{p.morada}</small></td>
-                  <td style={{ textAlign: 'center' }}><strong>{(p as any).vehicleCount ?? 0}</strong></td>
+                  <td style={{ textAlign: "center" }}>
+                    <span style={{
+                      background: (p.vehicleCount ?? 0) > 0 ? "#e8f5e9" : "#f5f5f5",
+                      color:      (p.vehicleCount ?? 0) > 0 ? "#2e7d32" : "#9e9e9e",
+                      padding:    "3px 10px",
+                      borderRadius: 12,
+                      fontSize: 13,
+                      fontWeight: 700,
+                    }}>
+                      <i className="bi bi-truck" style={{ marginRight: 4 }} />
+                      {p.vehicleCount ?? 0}
+                    </span>
+                  </td>
                   <td><StatusBadge status={p.status} /></td>
                   <td>
-                    <button className="btn-action btn-edit" onClick={() => openEdit(p)} title="Editar"><i className="bi bi-pencil" /></button>
+                    <button className="btn-action btn-edit"     onClick={() => openEdit(p)}         title="Editar"><i className="bi bi-pencil" /></button>
                     <button className="btn-action btn-reset-pw" onClick={() => handleResetSenha(p)} title="Reset senha"><i className="bi bi-envelope-paper" /></button>
-                    <button className="btn-action btn-delete" onClick={() => handleDelete(p)} title="Eliminar"><i className="bi bi-trash" /></button>
+                    <button className="btn-action btn-delete"   onClick={() => handleDelete(p)}     title="Eliminar"><i className="bi bi-trash" /></button>
                   </td>
                 </tr>
               ))}
@@ -234,7 +248,9 @@ export default function ProprietariosPage({ onMenuToggle, onLogout }: Props) {
       </div>
 
       {modal && (
-        <Modal title={`${form.id ? "Editar" : "Novo"} Proprietário`} icon="bi-person-vcard"
+        <Modal
+          title={`${form.id ? "Editar" : "Novo"} Proprietário`}
+          icon="bi-person-vcard"
           onClose={() => setModal(false)}
           footer={
             <>
@@ -246,7 +262,6 @@ export default function ProprietariosPage({ onMenuToggle, onLogout }: Props) {
           }
         >
           <form>
-            {/* Foto */}
             <div className="form-group" style={{ textAlign: "center" }}>
               <div onClick={() => fileRef.current?.click()}
                 style={{ width: 90, height: 90, borderRadius: "50%", cursor: "pointer", background: "#f0f4f5", border: "2px dashed #55a0a6", display: "inline-flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>

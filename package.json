@@ -1,28 +1,30 @@
 {
   "name": "frota-react",
   "private": true,
-  "version": "2.0.0",
+  "version": "3.0.0",
   "type": "module",
-  "description": "Sistema de Gestão de Frota — Supabase Integration",
+  "description": "Sistema de Gestão de Frota — Neon PostgreSQL",
   "scripts": {
-    "dev":     "vite",
-    "build":   "node ./node_modules/typescript/bin/tsc -b && node ./node_modules/vite/bin/vite.js build",
+    "dev": "vite",
+    "build": "node ./node_modules/typescript/bin/tsc -b && node ./node_modules/vite/bin/vite.js build",
     "preview": "node ./node_modules/vite/bin/vite.js preview",
-    "lint":    "eslint src --ext ts,tsx --report-unused-disable-directives",
-    "create-superadmin": "node scripts/create_superadmin.mjs",
-    "seed-dev-data": "node scripts/seed_dev_data.mjs"
+    "lint": "eslint src --ext ts,tsx --report-unused-disable-directives"
   },
   "dependencies": {
-    "react":              "^18.3.1",
-    "react-dom":          "^18.3.1",
-    "@supabase/supabase-js": "^2.44.0"
+    "@neondatabase/serverless": "^0.9.5",
+    "bcryptjs": "^3.0.3",
+    "jsonwebtoken": "^9.0.3",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
   },
   "devDependencies": {
-    "@types/react":         "^18.3.5",
-    "@types/react-dom":     "^18.3.0",
-    "@types/leaflet":       "^1.9.12",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/leaflet": "^1.9.12",
+    "@types/react": "^18.3.5",
+    "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
-    "typescript":           "^5.5.3",
-    "vite":                 "^5.4.1"
+    "typescript": "^5.5.3",
+    "vite": "^5.4.1"
   }
 }
