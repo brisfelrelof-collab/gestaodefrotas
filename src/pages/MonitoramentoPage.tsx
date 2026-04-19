@@ -2,7 +2,6 @@
 import { useEffect, useRef, useState } from "react";
 import PageHeader from "../components/PageHeader";
 import { StatusBadge, EmptyRow } from "../components/StatusBadge";
-import { veiculosStore, alugueresStore, motoristasStore, proprietariosStore } from "../store";
 import type { Aluguer, Viatura, Motorista } from "../types";
 
 const VERCEL_GPS_URL = "/api/gps";
@@ -23,6 +22,18 @@ interface GpsLive {
 const MARKER_COLORS = [
   "#55a0a6", "#e74c3c", "#f39c12", "#27ae60",
   "#8e44ad", "#2980b9", "#d35400", "#16a085",
+];
+
+// Lista local de viaturas / meta (sem coordenadas). Usada para preencher filtros
+// e associar proprietários sem depender do Supabase.
+const VEHICLES_META = [
+  { id: "v1", nome: "automovel1", marca: "Toyota", modelo: "Hilux", placa: "A-001", proprietarioId: "proprietario1" },
+  { id: "v2", nome: "automovel2", marca: "Nissan", modelo: "Frontier", placa: "A-002", proprietarioId: "proprietario1" },
+  { id: "v3", nome: "automovel3", marca: "Mitsubishi", modelo: "L200", placa: "A-003", proprietarioId: "proprietario1" },
+  { id: "v4", nome: "automovel4", marca: "Ford", modelo: "Ranger", placa: "B-001", proprietarioId: "proprietario2" },
+  { id: "v5", nome: "automovel5", marca: "Chevrolet", modelo: "S10", placa: "B-002", proprietarioId: "proprietario2" },
+  { id: "v6", nome: "automovel6", marca: "Hyundai", modelo: "H100", placa: "C-001", proprietarioId: "empresa" },
+  { id: "v7", nome: "automovel7", marca: "Isuzu", modelo: "D-Max", placa: "C-002", proprietarioId: "empresa" },
 ];
 
 interface MonitoramentoPageProps {
@@ -204,31 +215,19 @@ export default function MonitoramentoPage({ onMenuToggle, onLogout, proprietario
       const data: GpsLive[] = await res.json();
       if (Array.isArray(data)) {
         let filtered = data;
-        // if viewing a specific proprietor, filter gps positions to that proprietor
         if (proprietarioId) {
           const propId = proprietarioId as string;
-          try {
-            const prop = await proprietariosStore.getById(propId);
-            const pname = prop?.nome ?? null;
-            if (pname) {
-              setProprietarioNome(pname);
-              // prefer matching by normalized name or by id if gps carries id
-              const normalize = (s: string) => s.replace(/\s+/g, "").toLowerCase();
-              const pn = normalize(pname);
-              filtered = data.filter((d) => {
-                const ownerRaw = (d as any).proprietario || (d as any).owner || "";
-                if (!ownerRaw) return false;
-                const on = normalize(ownerRaw + "");
-                return on === pn || on.includes(pn) || pn.includes(on) || ownerRaw === propId;
-              });
-            }
-            // compute proprietor total vehicles from viaturas DB (fallback to gps list)
-            const propVehicles = await veiculosStore.getByProprietario(propId);
-            if (propVehicles && propVehicles.length > 0) setProprietarioVehicleTotal(propVehicles.length);
-            else setProprietarioVehicleTotal(filtered.length);
-          } catch (e) {
-            // ignore
-          }
+          // prefer matching by explicit proprietarioId in VEHICLES_META or by owner field in GPS payload
+          filtered = data.filter((d) => {
+            const meta = VEHICLES_META.find((v) => v.nome === d.nome);
+            if (meta && meta.proprietarioId === propId) return true;
+            const ownerRaw = (d as any).proprietario || (d as any).owner || "";
+            if (!ownerRaw) return false;
+            return ownerRaw === propId || ownerRaw === meta?.proprietarioId || ownerRaw === (meta?.proprietarioId ?? "");
+          });
+          setProprietarioNome(propId);
+          const total = VEHICLES_META.filter((v) => v.proprietarioId === propId).length;
+          setProprietarioVehicleTotal(total || filtered.length);
         } else {
           setProprietarioNome(null);
           setProprietarioVehicleTotal(null);
@@ -274,15 +273,10 @@ export default function MonitoramentoPage({ onMenuToggle, onLogout, proprietario
     let currentFiltro = "todos";
 
     const init = async () => {
-      const [asAll, vs, ms] = await Promise.all([
-        alugueresStore.getAll(),
-        veiculosStore.getAll(),
-        motoristasStore.getAll(),
-      ]);
-      const as = (asAll as any[]).filter((a) => a.status === "ativo");
-      setOperacoes(as as Aluguer[]);
-      setVeiculosList(vs as Viatura[]);
-      setMotoristasList(ms as Motorista[]);
+      // Não usamos Supabase aqui: carregamos metadados locais mínimos
+      setOperacoes([]);
+      setVeiculosList(VEHICLES_META as Viatura[]);
+      setMotoristasList([]);
 
       const tryInit = () => {
         if ((window as any).L) {
@@ -316,8 +310,8 @@ export default function MonitoramentoPage({ onMenuToggle, onLogout, proprietario
   // Nomes disponíveis para o filtro (todos os carros recebidos + operações activas)
   const nomesDisponiveis = Array.from(
     new Set([
+      ...VEHICLES_META.map((v) => v.nome),
       ...gpsLive.map((g: GpsLive) => g.nome),
-      ...operacoes.map((a: Aluguer) => veiculosList.find((v) => v.id === ((a as any).viaturaId ?? (a as any).viatura_id ?? ""))?.nome).filter(Boolean) as string[],
     ])
   );
 
