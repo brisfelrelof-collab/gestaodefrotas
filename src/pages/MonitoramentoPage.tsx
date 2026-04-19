@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import PageHeader from "../components/PageHeader";
 import { StatusBadge, EmptyRow } from "../components/StatusBadge";
-import { veiculosStore, alugueresStore, motoristasStore } from "../store";
+import { veiculosStore, alugueresStore, motoristasStore, proprietariosStore } from "../store";
 import type { Aluguer, Viatura, Motorista } from "../types";
 
 const VERCEL_GPS_URL = "/api/gps";
@@ -31,7 +31,7 @@ interface MonitoramentoPageProps {
   proprietarioId?: string;
 }
 
-export default function MonitoramentoPage({ onMenuToggle, onLogout }: MonitoramentoPageProps) {
+export default function MonitoramentoPage({ onMenuToggle, onLogout, proprietarioId }: MonitoramentoPageProps) {
   const mapRef        = useRef<HTMLDivElement>(null);
   const leafletMap    = useRef<any>(null);
   const markersRef    = useRef<Record<string, any>>({});
@@ -43,6 +43,8 @@ export default function MonitoramentoPage({ onMenuToggle, onLogout }: Monitorame
   const [espStatus,  setEspStatus]  = useState<string>("");
   const [gpsLive,    setGpsLive]    = useState<GpsLive[]>([]);
   const [veiculosList, setVeiculosList] = useState<Viatura[]>([]);
+  const [proprietarioNome, setProprietarioNome] = useState<string | null>(null);
+  const [proprietarioVehicleTotal, setProprietarioVehicleTotal] = useState<number | null>(null);
   const [motoristasList, setMotoristasList] = useState<Motorista[]>([]);
   const [filtroNome, setFiltroNome] = useState<string>("todos");
   const [layer,      setLayer]      = useState("street");
@@ -100,6 +102,15 @@ export default function MonitoramentoPage({ onMenuToggle, onLogout }: Monitorame
   function updateMarkers(positions: GpsLive[], filtro: string) {
     const L = (window as any).L;
     if (!L || !leafletMap.current) return;
+
+    // remove markers for vehicles not present in the current positions list
+    const present = new Set(positions.map((p) => p.nome));
+    Object.keys(markersRef.current).forEach((nome) => {
+      if (!present.has(nome)) {
+        try { leafletMap.current.removeLayer(markersRef.current[nome]); } catch {};
+        delete markersRef.current[nome];
+      }
+    });
 
     // Esconde/mostra marcadores conforme o filtro
     Object.entries(markersRef.current).forEach(([nome, marker]) => {
@@ -192,8 +203,39 @@ export default function MonitoramentoPage({ onMenuToggle, onLogout }: Monitorame
       if (!res.ok) return;
       const data: GpsLive[] = await res.json();
       if (Array.isArray(data)) {
-        setGpsLive(data);
-        updateMarkers(data, filtroActual);
+        let filtered = data;
+        // if viewing a specific proprietor, filter gps positions to that proprietor
+        if (proprietarioId) {
+          const propId = proprietarioId as string;
+          try {
+            const prop = await proprietariosStore.getById(propId);
+            const pname = prop?.nome ?? null;
+            if (pname) {
+              setProprietarioNome(pname);
+              // prefer matching by normalized name or by id if gps carries id
+              const normalize = (s: string) => s.replace(/\s+/g, "").toLowerCase();
+              const pn = normalize(pname);
+              filtered = data.filter((d) => {
+                const ownerRaw = (d as any).proprietario || (d as any).owner || "";
+                if (!ownerRaw) return false;
+                const on = normalize(ownerRaw + "");
+                return on === pn || on.includes(pn) || pn.includes(on) || ownerRaw === propId;
+              });
+            }
+            // compute proprietor total vehicles from viaturas DB (fallback to gps list)
+            const propVehicles = await veiculosStore.getByProprietario(propId);
+            if (propVehicles && propVehicles.length > 0) setProprietarioVehicleTotal(propVehicles.length);
+            else setProprietarioVehicleTotal(filtered.length);
+          } catch (e) {
+            // ignore
+          }
+        } else {
+          setProprietarioNome(null);
+          setProprietarioVehicleTotal(null);
+        }
+
+        setGpsLive(filtered);
+        updateMarkers(filtered, filtroActual);
       }
     } catch {
       // Sem dados ainda — normal antes do primeiro POST do ESP32
@@ -298,7 +340,7 @@ export default function MonitoramentoPage({ onMenuToggle, onLogout }: Monitorame
         }}
       >
         {[
-          { label: "Veículos online",  value: gpsLive.filter((g) => g.fix).length,               icon: "bi-broadcast-pin",   cor: "#55a0a6" },
+          { label: proprietarioId ? "Total de Veículos" : "Veículos online",  value: proprietarioId ? (proprietarioVehicleTotal ?? 0) : gpsLive.filter((g) => g.fix).length,               icon: "bi-broadcast-pin",   cor: "#55a0a6" },
           { label: "Operações activas",value: operacoes.length,                                    icon: "bi-calendar-check",  cor: "#28a745" },
           { label: "Velocidade máx.",  value: gpsLive.length ? Math.max(...gpsLive.map((g) => g.spd)).toFixed(1) + " km/h" : "—", icon: "bi-speedometer2", cor: "#ffc107" },
           { label: "Carros no mapa",   value: Object.keys(markersRef.current).length,              icon: "bi-car-front",       cor: "#e74c3c" },
