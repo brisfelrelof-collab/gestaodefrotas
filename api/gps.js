@@ -15,12 +15,86 @@ const TEST_CAR = {
   sat:        8,
   alt:        60.0,
   timestamp:  new Date().toISOString(),
-  isTeste:    true,   // flag para o frontend mostrar "(teste)"
+  isTeste:    false,
+  proprietario: 'proprietario1',
 };
 
 // Posições em memória — inicia com o carro de teste
 const posicoes = {
   automovel1: { ...TEST_CAR },
+  // adiciona automoveis 1..7
+  automovel2: {
+    nome: "automovel2",
+    lat: -8.84,
+    lng: 13.235,
+    spd: 20,
+    fix: true,
+    sat: 6,
+    alt: 55,
+    timestamp: new Date().toISOString(),
+    isTeste: false,
+    proprietario: 'proprietario1',
+  },
+  automovel3: {
+    nome: "automovel3",
+    lat: -8.839,
+    lng: 13.238,
+    spd: 30,
+    fix: true,
+    sat: 5,
+    alt: 50,
+    timestamp: new Date().toISOString(),
+    isTeste: false,
+    proprietario: 'proprietario1',
+  },
+  automovel4: {
+    nome: "automovel4",
+    lat: -8.837,
+    lng: 13.240,
+    spd: 10,
+    fix: true,
+    sat: 4,
+    alt: 45,
+    timestamp: new Date().toISOString(),
+    isTeste: false,
+    proprietario: 'proprietario2',
+  },
+  automovel5: {
+    nome: "automovel5",
+    lat: -8.836,
+    lng: 13.241,
+    spd: 5,
+    fix: true,
+    sat: 3,
+    alt: 40,
+    timestamp: new Date().toISOString(),
+    isTeste: false,
+    proprietario: 'proprietario2',
+  },
+  automovel6: {
+    nome: "automovel6",
+    lat: -8.835,
+    lng: 13.242,
+    spd: 0,
+    fix: false,
+    sat: 0,
+    alt: 0,
+    timestamp: new Date().toISOString(),
+    isTeste: false,
+    proprietario: 'empresa',
+  },
+  automovel7: {
+    nome: "automovel7",
+    lat: -8.834,
+    lng: 13.243,
+    spd: 0,
+    fix: false,
+    sat: 0,
+    alt: 0,
+    timestamp: new Date().toISOString(),
+    isTeste: false,
+    proprietario: 'empresa',
+  },
 };
 
 // Actualiza a posição simulada do carro de teste a cada requisição
@@ -37,7 +111,8 @@ function actualizarCarroTeste() {
     sat:        7 + Math.floor(Math.abs(Math.sin(testAngle)) * 3),
     alt:        60.0,
     timestamp:  new Date().toISOString(),
-    isTeste:    true,
+    isTeste:    false,
+    proprietario: 'proprietario1',
   };
 }
 

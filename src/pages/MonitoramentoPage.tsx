@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import PageHeader from "../components/PageHeader";
 import { StatusBadge, EmptyRow } from "../components/StatusBadge";
 import { veiculosStore, alugueresStore, motoristasStore } from "../store";
-import type { Aluguer } from "../types";
+import type { Aluguer, Viatura, Motorista } from "../types";
 
 const VERCEL_GPS_URL = "/api/gps";
 
@@ -28,6 +28,7 @@ const MARKER_COLORS = [
 interface MonitoramentoPageProps {
   onMenuToggle: () => void;
   onLogout:     () => void;
+  proprietarioId?: string;
 }
 
 export default function MonitoramentoPage({ onMenuToggle, onLogout }: MonitoramentoPageProps) {
@@ -41,6 +42,8 @@ export default function MonitoramentoPage({ onMenuToggle, onLogout }: Monitorame
   const [espHost,    setEspHost]    = useState("http://192.168.43.134");
   const [espStatus,  setEspStatus]  = useState<string>("");
   const [gpsLive,    setGpsLive]    = useState<GpsLive[]>([]);
+  const [veiculosList, setVeiculosList] = useState<Viatura[]>([]);
+  const [motoristasList, setMotoristasList] = useState<Motorista[]>([]);
   const [filtroNome, setFiltroNome] = useState<string>("todos");
   const [layer,      setLayer]      = useState("street");
 
@@ -53,12 +56,12 @@ export default function MonitoramentoPage({ onMenuToggle, onLogout }: Monitorame
 
   // ── Helpers ──────────────────────────────────────────────────────────────────
   function getVeiculoLabel(id: string) {
-    const v = veiculosStore.getById(id);
+    const v = veiculosList.find((x) => x.id === id);
     return v ? `${v.marca} ${v.modelo} (${v.placa})` : id;
   }
   function getMotoristaNome(id?: string) {
     if (!id) return "—";
-    const m = motoristasStore.getById(id);
+    const m = motoristasList.find((x) => x.id === id);
     return m ? m.nome : id;
   }
   function getCorCarro(nome: string): string {
@@ -85,15 +88,15 @@ export default function MonitoramentoPage({ onMenuToggle, onLogout }: Monitorame
     setLayer(newLayer);
     const L = (window as any).L;
     if (!L || !leafletMap.current) return;
+    // remove existing tile layers
     leafletMap.current.eachLayer((l: any) => {
       if (l._url) leafletMap.current.removeLayer(l);
     });
     const t = TILES[newLayer];
-    L.tileLayer(t.url, { attribution: t.attr, maxZoom: 19 })
-      .addTo(leafletMap.current);
+    L.tileLayer(t.url, { attribution: t.attr, maxZoom: 19 }).addTo(leafletMap.current);
   }
 
-  // ── Actualiza marcadores no mapa ──────────────────────────────────────────────
+  // Atualiza marcadores no mapa
   function updateMarkers(positions: GpsLive[], filtro: string) {
     const L = (window as any).L;
     if (!L || !leafletMap.current) return;
@@ -141,7 +144,7 @@ export default function MonitoramentoPage({ onMenuToggle, onLogout }: Monitorame
         markersRef.current[pos.nome].setLatLng([pos.lat, pos.lng]);
         markersRef.current[pos.nome].setPopupContent(popup);
       } else {
-        const icon = (window as any).L.divIcon({
+        const icon = L.divIcon({
           className: "",
           html: `
             <div style="
@@ -226,25 +229,36 @@ export default function MonitoramentoPage({ onMenuToggle, onLogout }: Monitorame
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────────
   useEffect(() => {
-    const as = alugueresStore.getAll().filter((a) => a.status === "ativo");
-    setOperacoes(as);
-
     let currentFiltro = "todos";
 
-    const tryInit = () => {
-      if ((window as any).L) {
-        initMap();
-        fetchVercelGps(currentFiltro);
-      } else {
-        setTimeout(tryInit, 200);
-      }
-    };
-    tryInit();
+    const init = async () => {
+      const [asAll, vs, ms] = await Promise.all([
+        alugueresStore.getAll(),
+        veiculosStore.getAll(),
+        motoristasStore.getAll(),
+      ]);
+      const as = (asAll as any[]).filter((a) => a.status === "ativo");
+      setOperacoes(as as Aluguer[]);
+      setVeiculosList(vs as Viatura[]);
+      setMotoristasList(ms as Motorista[]);
 
-    // Actualiza a cada 3 segundos
-    timerRef.current = setInterval(() => {
-      fetchVercelGps(currentFiltro);
-    }, 3000);
+      const tryInit = () => {
+        if ((window as any).L) {
+          initMap();
+          fetchVercelGps(currentFiltro);
+        } else {
+          setTimeout(tryInit, 200);
+        }
+      };
+      tryInit();
+
+      // Actualiza a cada 3 segundos
+      timerRef.current = setInterval(() => {
+        fetchVercelGps(currentFiltro);
+      }, 3000);
+    };
+
+    void init();
 
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
@@ -260,8 +274,8 @@ export default function MonitoramentoPage({ onMenuToggle, onLogout }: Monitorame
   // Nomes disponíveis para o filtro (todos os carros recebidos + operações activas)
   const nomesDisponiveis = Array.from(
     new Set([
-      ...gpsLive.map((g) => g.nome),
-      ...operacoes.map((a) => veiculosStore.getById(a.veiculoId)?.nome).filter(Boolean) as string[],
+      ...gpsLive.map((g: GpsLive) => g.nome),
+      ...operacoes.map((a: Aluguer) => veiculosList.find((v) => v.id === ((a as any).viaturaId ?? (a as any).viatura_id ?? ""))?.nome).filter(Boolean) as string[],
     ])
   );
 
@@ -288,7 +302,7 @@ export default function MonitoramentoPage({ onMenuToggle, onLogout }: Monitorame
           { label: "Operações activas",value: operacoes.length,                                    icon: "bi-calendar-check",  cor: "#28a745" },
           { label: "Velocidade máx.",  value: gpsLive.length ? Math.max(...gpsLive.map((g) => g.spd)).toFixed(1) + " km/h" : "—", icon: "bi-speedometer2", cor: "#ffc107" },
           { label: "Carros no mapa",   value: Object.keys(markersRef.current).length,              icon: "bi-car-front",       cor: "#e74c3c" },
-        ].map((s) => (
+        ].map((s: { label: string; value: any; icon: string; cor?: string }) => (
           <div className="stat-card" key={s.label} style={{ borderLeftColor: s.cor }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div>
@@ -365,7 +379,7 @@ export default function MonitoramentoPage({ onMenuToggle, onLogout }: Monitorame
         {/* Badges de carros online */}
         {gpsLive.length > 0 && (
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
-            {gpsLive.map((g) => {
+            {gpsLive.map((g: GpsLive) => {
               const cor = getCorCarro(g.nome);
               return (
                 <button
@@ -465,11 +479,12 @@ export default function MonitoramentoPage({ onMenuToggle, onLogout }: Monitorame
             </tr>
           </thead>
           <tbody>
-            {operacoes.length === 0 ? (
+              {operacoes.length === 0 ? (
               <EmptyRow cols={6} message="Nenhuma operação activa. Adicione alugueres com status 'Ativo'." />
             ) : (
               operacoes.map((a) => {
-                const veiculo  = veiculosStore.getById(a.veiculoId);
+                const veiculoIdSafe = (a as any).viaturaId ?? (a as any).viatura_id ?? "";
+                const veiculo  = veiculosList.find((v) => v.id === veiculoIdSafe);
                 const gpsData  = gpsLive.find((g) => g.nome === veiculo?.nome);
                 const cor      = veiculo?.nome ? getCorCarro(veiculo.nome) : "#aaa";
                 return (
@@ -483,7 +498,7 @@ export default function MonitoramentoPage({ onMenuToggle, onLogout }: Monitorame
                             display: "inline-block", flexShrink: 0,
                           }}
                         />
-                        <strong>{getVeiculoLabel(a.veiculoId)}</strong>
+                        <strong>{getVeiculoLabel(veiculoIdSafe)}</strong>
                       </div>
                     </td>
                     <td>{getMotoristaNome(a.motoristaId)}</td>
@@ -558,7 +573,7 @@ export default function MonitoramentoPage({ onMenuToggle, onLogout }: Monitorame
               Carros recebidos pelo servidor:
             </strong>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              {gpsLive.map((g) => (
+              {gpsLive.map((g: GpsLive) => (
                 <span
                   key={g.nome}
                   style={{

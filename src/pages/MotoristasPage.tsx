@@ -1,243 +1,322 @@
-// pages/MotoristasPage.tsx
+// src/pages/MotoristasPage.tsx
+// ─── Gestão de Motoristas (updated — async Firebase + viatura assignment) ────────
+
 import { useEffect, useState } from "react";
 import PageHeader from "../components/PageHeader";
 import { StatusBadge, Modal, EmptyRow } from "../components/StatusBadge";
-import { motoristasStore } from "../store";
-import type { Motorista } from "../types";
+import { motoristasStore, veiculosStore } from "../store";
+import type { Motorista, Viatura } from "../types";
 
+const CATEGORIAS = ["A", "B", "C", "D", "E"] as const;
 const PROVINCIAS = [
   "Bengo","Benguela","Bié","Cabinda","Cuando Cubango","Cuanza Norte",
   "Cuanza Sul","Cunene","Huambo","Huíla","Luanda","Lunda Norte",
   "Lunda Sul","Malanje","Moxico","Namibe","Uíge","Zaire",
 ];
 
-const EMPTY: Omit<Motorista,"id"> = {
-  nome:"", bi:"", cartaConducao:"", categoriaCarta:"B",
-  telefone:"", dataNascimento:"", provincia:"", status:"ativo",
+const EMPTY: Partial<Motorista> = {
+  nome: "",
+  bi: "",
+  cartaConducao: "",
+  categoriaCarta: "B",
+  telefone: "",
+  dataNascimento: "",
+  provincia: "",
+  status: "ativo",
 };
 
-interface MotoristasPageProps {
-  onMenuToggle: () => void;
-  onLogout: () => void;
-}
+interface Props { onMenuToggle: () => void; onLogout: () => void; }
 
-export default function MotoristasPage({ onMenuToggle, onLogout }: MotoristasPageProps) {
-  const [motoristas, setMotoristas] = useState<Motorista[]>([]);
-  const [search, setSearch]         = useState("");
-  const [modal, setModal]           = useState(false);
-  const [form, setForm]             = useState<Partial<Motorista>>({ ...EMPTY });
+export default function MotoristasPage({ onMenuToggle, onLogout }: Props) {
+  const [motoristas, setMotoristas] = useState<(Motorista & { id: string })[]>([]);
+  const [viaturas,   setViaturas]   = useState<(Viatura & { id: string })[]>([]);
+  const [search,     setSearch]     = useState("");
+  const [modal,      setModal]      = useState(false);
+  const [atribModal, setAtribModal] = useState(false);
+  const [form,       setForm]       = useState<Partial<Motorista>>({ ...EMPTY });
+  const [atribForm,  setAtribForm]  = useState<{ motoristaId: string; viaturaId: string }>({ motoristaId: "", viaturaId: "" });
+  const [loading,    setLoading]    = useState(false);
+  const [saving,     setSaving]     = useState(false);
 
-  const reload = () => setMotoristas(motoristasStore.getAll().sort((a,b) => a.nome.localeCompare(b.nome)));
+  const reload = async () => {
+    setLoading(true);
+    const [m, v] = await Promise.all([motoristasStore.getAll(), veiculosStore.getAll()]);
+    setMotoristas(m);
+    setViaturas(v);
+    setLoading(false);
+  };
   useEffect(() => { reload(); }, []);
 
   const filtered = motoristas.filter((m) =>
-    [m.nome, m.bi, m.cartaConducao, m.telefone, m.email].some((f) =>
+    [m.nome, m.bi, m.cartaConducao, m.telefone, m.email, m.provincia].some((f) =>
       f?.toLowerCase().includes(search.toLowerCase())
     )
   );
 
+  const getViaturaInfo = (viaturaId?: string) => {
+    if (!viaturaId) return null;
+    return viaturas.find((v) => v.id === viaturaId);
+  };
+
   const openNew  = () => { setForm({ ...EMPTY }); setModal(true); };
   const openEdit = (m: Motorista) => { setForm({ ...m }); setModal(true); };
 
-  const handleDelete = (id: string) => {
+  const openAtrib = (m: Motorista) => {
+    setAtribForm({ motoristaId: m.id, viaturaId: m.viaturaAtribuidaId ?? "" });
+    setAtribModal(true);
+  };
+
+  const handleDelete = async (id: string) => {
     if (!confirm("Tem certeza que deseja excluir este motorista?")) return;
-    motoristasStore.remove(id); reload();
+    await motoristasStore.remove(id);
+    reload();
   };
 
-  const handleSave = () => {
-    const bi = form.bi?.trim().toUpperCase() ?? "";
-    if (!form.nome?.trim())        { alert("Nome é obrigatório!");              return; }
-    if (!bi)                       { alert("BI é obrigatório!");                return; }
-    if (!form.cartaConducao?.trim()){ alert("Carta de condução é obrigatória!"); return; }
-    if (!form.categoriaCarta)      { alert("Categoria é obrigatória!");         return; }
-    if (!form.telefone?.trim())    { alert("Telefone é obrigatório!");          return; }
-    if (!form.dataNascimento)      { alert("Data de nascimento é obrigatória!"); return; }
-    if (!form.provincia)           { alert("Província é obrigatória!");         return; }
-
-    if (!form.id && motoristasStore.exists("bi", bi)) {
-      alert("Já existe um motorista com este BI!"); return;
+  const handleSave = async () => {
+    const { nome, bi, cartaConducao, categoriaCarta, telefone, dataNascimento, provincia } = form;
+    if (!nome || !bi || !cartaConducao || !telefone || !dataNascimento || !provincia) {
+      alert("Preencha todos os campos obrigatórios."); return;
     }
-
-    const data = { ...form, bi } as Omit<Motorista,"id">;
-    if (form.id) motoristasStore.update(form.id, data);
-    else         motoristasStore.add(data);
-    reload(); setModal(false);
+    setSaving(true);
+    try {
+      if (form.id) {
+        const { id, ...data } = form as Motorista;
+        if (await motoristasStore.exists("bi", bi, id)) { alert("BI já cadastrado."); return; }
+        await motoristasStore.update(id, data);
+      } else {
+        if (await motoristasStore.exists("bi", bi)) { alert("BI já cadastrado."); return; }
+        await motoristasStore.add(form as Omit<Motorista, "id">);
+      }
+      await reload();
+      setModal(false);
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const f = (field: keyof Motorista) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
-    setForm((p) => ({ ...p, [field]: e.target.value }));
+  const handleAtribuir = async () => {
+    if (!atribForm.motoristaId) return;
+    setSaving(true);
+    try {
+      await motoristasStore.update(atribForm.motoristaId, {
+        viaturaAtribuidaId: atribForm.viaturaId || undefined,
+      });
+      // Update viatura status
+      if (atribForm.viaturaId) {
+        await veiculosStore.update(atribForm.viaturaId, { status: "ocupada" });
+      }
+      await reload();
+      setAtribModal(false);
+    } finally {
+      setSaving(false);
+    }
+  };
 
-  const fmtTelefone = (tel: string) =>
-    tel && tel.replace(/\D/g,"").length === 9
-      ? tel.replace(/(\d{3})(\d{3})(\d{3})/, "$1 $2 $3")
-      : tel;
+  const f = (field: keyof Motorista) =>
+    (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
+      setForm((p) => ({ ...p, [field]: e.target.value }));
 
   return (
     <div>
       <PageHeader icon="bi-person-badge" title="Gestão de Motoristas" onMenuToggle={onMenuToggle} onLogout={onLogout} />
 
-      <div style={{ display:"flex", justifyContent:"flex-end", marginBottom:16 }}>
+      {/* Toolbar */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 10 }}>
+        <div className="search-box" style={{ flex: 1, minWidth: 220 }}>
+          <i className="bi bi-search" />
+          <input type="text" className="form-control"
+            placeholder="Buscar por nome, BI, carta de condução, telefone..."
+            value={search} onChange={(e) => setSearch(e.target.value)} />
+        </div>
         <button className="btn-primary-custom" onClick={openNew}>
-          <i className="bi bi-plus-circle" /> Novo Motorista
+          <i className="bi bi-person-plus" /> Novo Motorista
         </button>
       </div>
 
-      <div className="search-box" style={{ marginBottom:16 }}>
-        <i className="bi bi-search" />
-        <input type="text" className="form-control" id="searchInput"
-          placeholder="Buscar motorista por nome, BI, carta..."
-          value={search} onChange={(e) => setSearch(e.target.value)} />
+      {/* Stats */}
+      <div className="stats-row" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 16, marginBottom: 20 }}>
+        {[
+          { label: "Total",    value: motoristas.length },
+          { label: "Activos",  value: motoristas.filter((m) => m.status === "ativo").length },
+          { label: "Inativos", value: motoristas.filter((m) => m.status === "inativo").length },
+          { label: "Com Viatura", value: motoristas.filter((m) => m.viaturaAtribuidaId).length },
+        ].map((s) => (
+          <div className="stat-card" key={s.label}><h6 className="text-muted">{s.label}</h6><h3>{s.value}</h3></div>
+        ))}
       </div>
 
+      {/* Table */}
       <div className="table-container">
         <div className="table-responsive">
           <table className="table-custom">
             <thead>
               <tr>
-                <th>Nome Completo</th><th>BI/Nº</th><th>Carta Condução</th>
-                <th>Categoria</th><th>Telefone</th><th>Email</th>
-                <th>Status</th><th>Ações</th>
+                <th>Nome</th><th>BI</th><th>Carta</th><th>Categoria</th>
+                <th>Telefone</th><th>Província</th><th>Viatura</th>
+                <th>Status</th><th style={{ width: 120 }}>Ações</th>
               </tr>
             </thead>
-            <tbody id="motoristasTable">
-              {filtered.length === 0 ? (
-                <EmptyRow cols={8} message="Nenhum motorista cadastrado." />
-              ) : filtered.map((m) => (
-                <tr key={m.id}>
-                  <td>
-                    <strong>{m.nome}</strong>
-                    {(m.provincia || m.municipio) && (
-                      <><br /><small style={{ color:"#888" }}>{m.provincia}{m.municipio ? `, ${m.municipio}` : ""}</small></>
-                    )}
-                  </td>
-                  <td>{m.bi}</td>
-                  <td>
-                    {m.cartaConducao}
-                    <br /><small style={{ color:"#888" }}>{m.categoriaCarta}</small>
-                  </td>
-                  <td>{m.categoriaCarta}</td>
-                  <td>
-                    {fmtTelefone(m.telefone)}
-                    {m.telefoneAlternativo && (
-                      <><br /><small>Alt: {m.telefoneAlternativo}</small></>
-                    )}
-                  </td>
-                  <td>{m.email || "—"}</td>
-                  <td><StatusBadge status={m.status} /></td>
-                  <td>
-                    <button className="btn-action btn-edit" onClick={() => openEdit(m)}><i className="bi bi-pencil" /></button>
-                    <button className="btn-action btn-delete" onClick={() => handleDelete(m.id)}><i className="bi bi-trash" /></button>
-                  </td>
-                </tr>
-              ))}
+            <tbody>
+              {loading ? (
+                <tr><td colSpan={9} style={{ textAlign: "center", padding: 24 }}><span className="loading-spinner" /></td></tr>
+              ) : filtered.length === 0 ? (
+                <EmptyRow cols={9} message="Nenhum motorista cadastrado." />
+              ) : filtered.map((m) => {
+                const viatura = getViaturaInfo(m.viaturaAtribuidaId);
+                return (
+                  <tr key={m.id}>
+                    <td><strong>{m.nome}</strong></td>
+                    <td><code style={{ fontSize: 12 }}>{m.bi}</code></td>
+                    <td><code style={{ fontSize: 12 }}>{m.cartaConducao}</code></td>
+                    <td><span style={{ fontWeight: 700, color: "var(--primary-color)" }}>{m.categoriaCarta}</span></td>
+                    <td>{m.telefone}</td>
+                    <td>{m.provincia}</td>
+                    <td>
+                      {viatura
+                        ? <small style={{ color: "var(--primary-color)" }}><i className="bi bi-car-front" style={{ marginRight: 4 }} />{viatura.placa}</small>
+                        : <small style={{ color: "#ccc" }}>—</small>
+                      }
+                    </td>
+                    <td><StatusBadge status={m.status} /></td>
+                    <td>
+                      <button className="btn-action btn-edit" onClick={() => openEdit(m)} title="Editar"><i className="bi bi-pencil" /></button>
+                      <button className="btn-action" onClick={() => openAtrib(m)} title="Atribuir viatura"
+                        style={{ background: "#e3f2fd", color: "#1565c0", border: "none", borderRadius: 6, padding: "4px 8px", cursor: "pointer", marginRight: 4 }}>
+                        <i className="bi bi-car-front" />
+                      </button>
+                      <button className="btn-action btn-delete" onClick={() => handleDelete(m.id)} title="Eliminar"><i className="bi bi-trash" /></button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
       </div>
 
+      {/* Modal — Edit/Create */}
       {modal && (
-        <Modal
-          title={`${form.id ? "Editar" : "Cadastro de"} Motorista`}
-          icon="bi-person-badge"
-          large
+        <Modal title={`${form.id ? "Editar" : "Novo"} Motorista`} icon="bi-person-badge"
           onClose={() => setModal(false)}
           footer={
             <>
               <button className="btn-secondary-custom" onClick={() => setModal(false)}>Cancelar</button>
-              <button className="btn-primary-custom" onClick={handleSave}>Salvar</button>
+              <button className="btn-primary-custom" onClick={handleSave} disabled={saving}>
+                {saving ? <><span className="loading-spinner" style={{ width: 14, height: 14, marginRight: 6 }} />A guardar...</> : "Guardar"}
+              </button>
             </>
           }
         >
-          <form id="driverForm">
-            <input type="hidden" id="driverId" value={form.id ?? ""} />
+          <form>
+            <div className="form-group">
+              <label className="form-label">Nome Completo *</label>
+              <input type="text" required className="form-control" value={form.nome ?? ""} onChange={f("nome")} />
+            </div>
             <div className="grid-2">
-              <div className="form-group" style={{ gridColumn:"1 / span 1" }}>
-                <label className="form-label">Nome Completo *</label>
-                <input type="text" id="nome" required className="form-control" value={form.nome ?? ""} onChange={f("nome")} />
+              <div className="form-group">
+                <label className="form-label">Nº do BI *</label>
+                <input type="text" required className="form-control" value={form.bi ?? ""} onChange={f("bi")} />
               </div>
               <div className="form-group">
-                <label className="form-label">BI/Nº *</label>
-                <input type="text" id="bi" required className="form-control" value={form.bi ?? ""} onChange={f("bi")} />
+                <label className="form-label">Data de Nascimento *</label>
+                <input type="date" required className="form-control" value={form.dataNascimento ?? ""} onChange={f("dataNascimento")} />
               </div>
             </div>
-            <div className="grid-3">
+            <div className="grid-2">
               <div className="form-group">
-                <label className="form-label">Carta Condução *</label>
-                <input type="text" id="cartaConducao" required className="form-control" value={form.cartaConducao ?? ""} onChange={f("cartaConducao")} />
+                <label className="form-label">Carta de Condução *</label>
+                <input type="text" required className="form-control" value={form.cartaConducao ?? ""} onChange={f("cartaConducao")} />
               </div>
               <div className="form-group">
                 <label className="form-label">Categoria *</label>
-                <select id="categoriaCarta" required className="form-select" value={form.categoriaCarta ?? "B"} onChange={f("categoriaCarta")}>
-                  <option value="">Selecione</option>
-                  <option value="A">A - Motociclos</option>
-                  <option value="B">B - Ligeiros</option>
-                  <option value="C">C - Pesados</option>
-                  <option value="D">D - Passageiros</option>
-                  <option value="E">E - Com reboque</option>
+                <select required className="form-select" value={form.categoriaCarta ?? "B"} onChange={f("categoriaCarta")}>
+                  {CATEGORIAS.map((c) => <option key={c}>{c}</option>)}
                 </select>
               </div>
-              <div className="form-group">
-                <label className="form-label">Validade</label>
-                <input type="date" id="validadeCarta" className="form-control" value={form.validadeCarta ?? ""} onChange={f("validadeCarta")} />
-              </div>
             </div>
             <div className="grid-2">
+              <div className="form-group">
+                <label className="form-label">Validade da Carta</label>
+                <input type="date" className="form-control" value={form.validadeCarta ?? ""} onChange={f("validadeCarta")} />
+              </div>
               <div className="form-group">
                 <label className="form-label">Telefone *</label>
-                <input type="tel" id="telefone" required className="form-control" value={form.telefone ?? ""} onChange={f("telefone")} />
-              </div>
-              <div className="form-group">
-                <label className="form-label">Telefone Alternativo</label>
-                <input type="tel" id="telefoneAlternativo" className="form-control" value={form.telefoneAlternativo ?? ""} onChange={f("telefoneAlternativo")} />
+                <input type="tel" required className="form-control" value={form.telefone ?? ""} onChange={f("telefone")} />
               </div>
             </div>
             <div className="grid-2">
               <div className="form-group">
-                <label className="form-label">Email</label>
-                <input type="email" id="email" className="form-control" value={form.email ?? ""} onChange={f("email")} />
+                <label className="form-label">Telefone Alternativo</label>
+                <input type="tel" className="form-control" value={form.telefoneAlternativo ?? ""} onChange={f("telefoneAlternativo")} />
               </div>
               <div className="form-group">
-                <label className="form-label">Data Nascimento *</label>
-                <input type="date" id="dataNascimento" required className="form-control" value={form.dataNascimento ?? ""} onChange={f("dataNascimento")} />
+                <label className="form-label">Email</label>
+                <input type="email" className="form-control" value={form.email ?? ""} onChange={f("email")} />
               </div>
             </div>
             <div className="grid-2">
               <div className="form-group">
                 <label className="form-label">Província *</label>
-                <select id="provincia" required className="form-select" value={form.provincia ?? ""} onChange={f("provincia")}>
+                <select required className="form-select" value={form.provincia ?? ""} onChange={f("provincia")}>
                   <option value="">Selecione</option>
                   {PROVINCIAS.map((p) => <option key={p}>{p}</option>)}
                 </select>
               </div>
               <div className="form-group">
                 <label className="form-label">Município</label>
-                <input type="text" id="municipio" className="form-control" value={form.municipio ?? ""} onChange={f("municipio")} />
+                <input type="text" className="form-control" value={form.municipio ?? ""} onChange={f("municipio")} />
               </div>
             </div>
             <div className="form-group">
               <label className="form-label">Endereço</label>
-              <textarea id="endereco" className="form-control" rows={2} value={form.endereco ?? ""} onChange={f("endereco")} />
+              <input type="text" className="form-control" value={form.endereco ?? ""} onChange={f("endereco")} />
             </div>
-            <div className="grid-2">
-              <div className="form-group">
-                <label className="form-label">Status *</label>
-                <select id="statusMotorista" required className="form-select" value={form.status ?? "ativo"} onChange={f("status")}>
-                  <option value="ativo">Ativo</option>
-                  <option value="inativo">Inativo</option>
-                  <option value="ferias">Férias</option>
-                  <option value="licenca">Licença Médica</option>
-                </select>
-              </div>
-              <div className="form-group">
-                <label className="form-label">Data Admissão</label>
-                <input type="date" id="dataAdmissao" className="form-control" value={form.dataAdmissao ?? ""} onChange={f("dataAdmissao")} />
-              </div>
+            <div className="form-group">
+              <label className="form-label">Status</label>
+              <select className="form-select" value={form.status ?? "ativo"} onChange={f("status")}>
+                <option value="ativo">Activo</option>
+                <option value="inativo">Inactivo</option>
+                <option value="ferias">De Férias</option>
+                <option value="licenca">De Licença</option>
+              </select>
             </div>
             <div className="form-group">
               <label className="form-label">Observações</label>
-              <textarea id="observacoes" className="form-control" rows={2} value={form.observacoes ?? ""} onChange={f("observacoes")} />
+              <textarea className="form-control" rows={2} value={form.observacoes ?? ""} onChange={f("observacoes")} />
             </div>
           </form>
+        </Modal>
+      )}
+
+      {/* Modal — Atribuir Viatura */}
+      {atribModal && (
+        <Modal title="Atribuir Viatura ao Motorista" icon="bi-car-front"
+          onClose={() => setAtribModal(false)}
+          footer={
+            <>
+              <button className="btn-secondary-custom" onClick={() => setAtribModal(false)}>Cancelar</button>
+              <button className="btn-primary-custom" onClick={handleAtribuir} disabled={saving}>
+                {saving ? "A guardar..." : "Atribuir"}
+              </button>
+            </>
+          }
+        >
+          <div style={{ marginBottom: 16, color: "#666" }}>
+            <i className="bi bi-info-circle" style={{ marginRight: 6 }} />
+            Selecione a viatura a atribuir a este motorista. Deixe em branco para remover a atribuição.
+          </div>
+          <div className="form-group">
+            <label className="form-label">Viatura</label>
+            <select className="form-select" value={atribForm.viaturaId}
+              onChange={(e) => setAtribForm((p) => ({ ...p, viaturaId: e.target.value }))}>
+              <option value="">— Sem viatura atribuída —</option>
+              {viaturas
+                .filter((v) => v.status === "disponivel" || v.id === atribForm.viaturaId)
+                .map((v) => (
+                  <option key={v.id} value={v.id}>{v.marca} {v.modelo} — {v.placa} ({v.status})</option>
+                ))}
+            </select>
+          </div>
         </Modal>
       )}
     </div>

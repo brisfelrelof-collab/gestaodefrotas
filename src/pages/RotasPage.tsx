@@ -5,8 +5,8 @@ import { StatusBadge, Modal, EmptyRow } from "../components/StatusBadge";
 import { rotasStore } from "../store";
 import type { Rota } from "../types";
 
-const EMPTY: Omit<Rota,"id"> = {
-  nomeRota:"", origem:"", destino:"", distancia:0, tempoEstimado:"", status:"ativa",
+const EMPTY: Partial<Rota> = {
+  nomeRota: "", origem: "", destino: "", distancia: 0, tempoEstimado: "", status: "ativa",
 };
 
 interface RotasPageProps {
@@ -21,12 +21,19 @@ export default function RotasPage({ onMenuToggle, onLogout }: RotasPageProps) {
   const [modal, setModal]       = useState(false);
   const [form, setForm]         = useState<Partial<Rota>>({ ...EMPTY });
 
-  const reload = () => setRotas(rotasStore.getAll().sort((a,b) => a.nomeRota.localeCompare(b.nomeRota)));
-  useEffect(() => { reload(); }, []);
+  const reload = async () => {
+    const rows = await rotasStore.getAll();
+    setRotas((rows as any[]).map((r) => ({
+      ...r,
+      nomeRota: r.nome_rota ?? r.nomeRota ?? "",
+      tempoEstimado: r.tempo_estimado ?? r.tempoEstimado ?? "",
+    })));
+  };
+  useEffect(() => { void reload(); }, []);
 
   const filtered = rotas.filter((r) => {
     const m = [r.nomeRota, r.origem, r.destino].some((s) =>
-      s.toLowerCase().includes(search.toLowerCase())
+      s?.toLowerCase().includes(search.toLowerCase())
     );
     const sf = statusF === "todos" || r.status === statusF;
     return m && sf;

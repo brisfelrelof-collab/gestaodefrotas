@@ -5,7 +5,7 @@ import { StatusBadge } from "../components/StatusBadge";
 import {
   veiculosStore, motoristasStore, rotasStore, alugueresStore,
 } from "../store";
-import type { Aluguer, Veiculo, Motorista, Rota } from "../types";
+import type { Aluguer, Viatura, Motorista, Rota } from "../types";
 
 interface DashboardPageProps {
   onMenuToggle: () => void;
@@ -20,14 +20,15 @@ export default function DashboardPage({ onMenuToggle, onLogout }: DashboardPageP
   const [recentAlugueres, setRecentAlugueres] = useState<Aluguer[]>([]);
 
   // Support maps (mirrors carregarDadosApoio)
-  const veiculosMap = useRef(new Map<string, Veiculo>());
+  const veiculosMap = useRef(new Map<string, Viatura>());
   const motoristasMap = useRef(new Map<string, Motorista>());
   const rotasMap = useRef(new Map<string, Rota>());
 
-  function getVeiculoInfo(veiculoId: string) {
-    const v = veiculosMap.current.get(veiculoId);
+  function getVeiculoInfo(viaturaId?: string) {
+    const id = viaturaId ?? "";
+    const v = veiculosMap.current.get(id);
     if (v) return { completo: `${v.marca} ${v.modelo} (${v.placa})` };
-    return { completo: veiculoId || "N/A" };
+    return { completo: id || "N/A" };
   }
   function getMotoristaNome(id: string) {
     return motoristasMap.current.get(id)?.nome ?? id ?? "N/A";
@@ -89,31 +90,47 @@ export default function DashboardPage({ onMenuToggle, onLogout }: DashboardPageP
     });
   }
 
-  function loadData() {
-    const veiculos = veiculosStore.getAll();
-    const motoristas = motoristasStore.getAll();
-    const rotas = rotasStore.getAll();
-    const alugueres = alugueresStore.getAll();
+  async function loadData() {
+    const [veiculos, motoristas, rotas, alugueres] = await Promise.all([
+      veiculosStore.getAll(),
+      motoristasStore.getAll(),
+      rotasStore.getAll(),
+      alugueresStore.getAll(),
+    ]);
 
     // Build lookup maps
-    veiculos.forEach((v) => veiculosMap.current.set(v.id, v));
-    motoristas.forEach((m) => motoristasMap.current.set(m.id, m));
-    rotas.forEach((r) => rotasMap.current.set(r.id, r));
+    (veiculos as Viatura[]).forEach((v) => veiculosMap.current.set(v.id, v));
+    (motoristas as Motorista[]).forEach((m) => motoristasMap.current.set(m.id, m));
+    (rotas as Rota[]).forEach((r) => rotasMap.current.set(r.id, r));
+
+    // include GPS / test vehicles from /api/gps in total veiculos
+    let gpsCount = 0;
+    try {
+      const res = await fetch('/api/gps');
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          // count unique names
+          const names = new Set<string>(data.map((d: any) => d.nome));
+          gpsCount = names.size;
+        }
+      }
+    } catch (e) { /* ignore */ }
 
     setStats({
-      veiculos: veiculos.length,
-      motoristas: motoristas.length,
-      rotas: rotas.length,
-      ativos: alugueres.filter((a) => a.status === "ativo").length,
+      veiculos: (veiculos as any[]).length + gpsCount,
+      motoristas: (motoristas as any[]).length,
+      rotas: (rotas as any[]).length,
+      ativos: (alugueres as any[]).filter((a: any) => a.status === "ativo").length,
     });
 
-    const recent = [...alugueres]
-      .sort((a, b) => (b.dataInicio ?? "").localeCompare(a.dataInicio ?? ""))
+    const recent = [...(alugueres as any[])]
+      .sort((a: any, b: any) => (b.dataInicio ?? "").localeCompare(a.dataInicio ?? ""))
       .slice(0, 10);
-    setRecentAlugueres(recent);
+    setRecentAlugueres(recent as Aluguer[]);
 
     // Chart renders after DOM is painted
-    setTimeout(() => carregarGrafico(alugueres), 100);
+    setTimeout(() => carregarGrafico(alugueres as Aluguer[]), 100);
   }
 
   useEffect(() => {
@@ -133,7 +150,7 @@ export default function DashboardPage({ onMenuToggle, onLogout }: DashboardPageP
           { label: "Total Motoristas", value: stats.motoristas, icon: "bi-person-badge" },
           { label: "Total Rotas",      value: stats.rotas,      icon: "bi-map" },
           { label: "Alugueres Ativos", value: stats.ativos,     icon: "bi-calendar-check" },
-        ].map((s) => (
+        ].map((s: { label: string; value: number; icon: string }) => (
           <div className="stat-card" key={s.label}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div>
@@ -164,9 +181,9 @@ export default function DashboardPage({ onMenuToggle, onLogout }: DashboardPageP
         ) : (
           <div className="list-group">
             {recentAlugueres.map((a) => {
-              const veiculoInfo = getVeiculoInfo(a.veiculoId);
+              const veiculoInfo = getVeiculoInfo((a as any).viaturaId ?? (a as any).viatura_id);
               const motoristaNome = getMotoristaNome(a.motoristaId ?? "");
-              const rotaNome = getRotaNome(a.rotaId ?? "");
+              const rotaNome = getRotaNome((a as any).rota_id ?? "");
               const inicio = a.dataInicio ? new Date(a.dataInicio).toLocaleDateString("pt-AO") : "—";
               const fim = a.dataFimPrevista ? new Date(a.dataFimPrevista).toLocaleDateString("pt-AO") : "—";
               return (
@@ -186,7 +203,7 @@ export default function DashboardPage({ onMenuToggle, onLogout }: DashboardPageP
                           <i className="bi bi-person-badge" style={{ marginRight: 4 }} />
                           <small>Motorista: {motoristaNome}</small>
                         </span>
-                        {a.rotaId && (
+                        {(a as any).rota_id && (
                           <span>
                             <i className="bi bi-map" style={{ marginRight: 4 }} />
                             <small>Rota: {rotaNome}</small>

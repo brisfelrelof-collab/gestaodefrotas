@@ -3,11 +3,22 @@ import { useEffect, useState } from "react";
 import PageHeader from "../components/PageHeader";
 import { StatusBadge, Modal, EmptyRow } from "../components/StatusBadge";
 import { alugueresStore, veiculosStore, motoristasStore, rotasStore } from "../store";
-import type { Aluguer, Veiculo, Motorista, Rota } from "../types";
+import type { Aluguer, Viatura, Motorista, Rota } from "../types";
 
-const EMPTY: Omit<Aluguer,"id"> = {
-  clienteNome:"", veiculoId:"", dataInicio:"",
-  dataFimPrevista:"", valorTotal:0, status:"ativo",
+const EMPTY: Partial<Aluguer> = {
+  clienteNome: "",
+  cliente_contato: "",
+  // Aluguer (legacy) reuses fields from Servico; include required legacy fields
+  viaturaId: "",
+  proprietarioId: "",
+  usuarioId: "",
+  dataInicio: "",
+  dataFimPrevista: "",
+  valor_diaria: 0,
+  valorTotal: 0,
+  valorProprietario: 0,
+  valorSistema: 0,
+  status: "em_andamento",
 };
 
 interface AlugueresPageProps {
@@ -17,7 +28,7 @@ interface AlugueresPageProps {
 
 export default function AlugueresPage({ onMenuToggle, onLogout }: AlugueresPageProps) {
   const [alugueres, setAlugueres] = useState<Aluguer[]>([]);
-  const [veiculos,  setVeiculos]  = useState<Veiculo[]>([]);
+  const [veiculos,  setVeiculos]  = useState<Viatura[]>([]);
   const [motoristas,setMotoristas]= useState<Motorista[]>([]);
   const [rotas,     setRotas]     = useState<Rota[]>([]);
 
@@ -26,16 +37,23 @@ export default function AlugueresPage({ onMenuToggle, onLogout }: AlugueresPageP
   const [modal,   setModal]   = useState(false);
   const [form,    setForm]    = useState<Partial<Aluguer>>({ ...EMPTY });
 
-  const reload = () => {
-    setAlugueres(alugueresStore.getAll().sort((a,b) => (b.dataInicio ?? "").localeCompare(a.dataInicio ?? "")));
-    setVeiculos(veiculosStore.getAll());
-    setMotoristas(motoristasStore.getAll());
-    setRotas(rotasStore.getAll());
+  const reload = async () => {
+    const [als, vs, ms, rs] = await Promise.all([
+      alugueresStore.getAll(),
+      veiculosStore.getAll(),
+      motoristasStore.getAll(),
+      rotasStore.getAll(),
+    ]);
+    setAlugueres(als.sort((a: Aluguer, b: Aluguer) => (b.dataInicio ?? "").localeCompare(a.dataInicio ?? "")));
+    setVeiculos(vs as Viatura[]);
+    setMotoristas(ms as Motorista[]);
+    setRotas(rs as Rota[]);
   };
-  useEffect(() => { reload(); }, []);
+  useEffect(() => { void reload(); }, []);
 
   // lookup helpers
-  const veiculoLabel = (id: string) => {
+  const veiculoLabel = (id?: string) => {
+    if (!id) return "—";
     const v = veiculos.find((x) => x.id === id);
     return v ? `${v.marca} ${v.modelo} (${v.placa})` : id;
   };
@@ -43,8 +61,8 @@ export default function AlugueresPage({ onMenuToggle, onLogout }: AlugueresPageP
   const rotaLabel      = (id?: string) => rotas.find((r) => r.id === id)?.nomeRota ?? id ?? "—";
 
   const filtered = alugueres.filter((a) => {
-    const m = [a.clienteNome, veiculoLabel(a.veiculoId), motoristaLabel(a.motoristaId)].some((s) =>
-      s.toLowerCase().includes(search.toLowerCase())
+    const m = [a.clienteNome, veiculoLabel(a.viaturaId), motoristaLabel(a.motoristaId)].some((s) =>
+      (s ?? "").toLowerCase().includes(search.toLowerCase())
     );
     const sf = statusF === "todos" || a.status === statusF;
     return m && sf;
@@ -62,8 +80,8 @@ export default function AlugueresPage({ onMenuToggle, onLogout }: AlugueresPageP
     const rows = [
       ["Cliente","Veículo","Motorista","Rota","Início","Fim Previsto","Valor (Kz)","Status"],
       ...filtered.map((a) => [
-        a.clienteNome, veiculoLabel(a.veiculoId), motoristaLabel(a.motoristaId),
-        rotaLabel(a.rotaId), a.dataInicio, a.dataFimPrevista, a.valorTotal, a.status,
+        a.clienteNome, veiculoLabel(a.viaturaId), motoristaLabel(a.motoristaId),
+        rotaLabel(a.rota_id), a.dataInicio, a.dataFimPrevista, a.valorTotal, a.status,
       ]),
     ];
     const csv = rows.map((r) => r.join(",")).join("\n");
@@ -74,7 +92,7 @@ export default function AlugueresPage({ onMenuToggle, onLogout }: AlugueresPageP
 
   const handleSave = () => {
     if (!form.clienteNome?.trim()) { alert("Nome do cliente é obrigatório!"); return; }
-    if (!form.veiculoId)           { alert("Selecione um veículo!");           return; }
+    if (!form.viaturaId)           { alert("Selecione um veículo!");           return; }
     if (!form.dataInicio)          { alert("Data de início é obrigatória!");   return; }
     if (!form.dataFimPrevista)     { alert("Data de fim é obrigatória!");      return; }
 
@@ -84,7 +102,7 @@ export default function AlugueresPage({ onMenuToggle, onLogout }: AlugueresPageP
     reload(); setModal(false);
   };
 
-  const f = (field: keyof Aluguer) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
+  const f = (field: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
     setForm((p) => ({ ...p, [field]: e.target.value }));
 
   return (
@@ -132,10 +150,10 @@ export default function AlugueresPage({ onMenuToggle, onLogout }: AlugueresPageP
                 <EmptyRow cols={9} message="Nenhum aluguer encontrado." />
               ) : filtered.map((a) => (
                 <tr key={a.id}>
-                  <td><strong>{a.clienteNome}</strong>{a.clienteContato && <><br /><small style={{ color:"#888" }}>{a.clienteContato}</small></>}</td>
-                  <td>{veiculoLabel(a.veiculoId)}</td>
+                  <td><strong>{a.clienteNome}</strong>{(a as any).cliente_contato && <><br /><small style={{ color:"#888" }}>{(a as any).cliente_contato}</small></>}</td>
+                  <td>{veiculoLabel((a as any).viaturaId)}</td>
                   <td>{motoristaLabel(a.motoristaId)}</td>
-                  <td>{rotaLabel(a.rotaId)}</td>
+                  <td>{rotaLabel((a as any).rota_id)}</td>
                   <td>{a.dataInicio ? new Date(a.dataInicio).toLocaleDateString("pt-AO") : "—"}</td>
                   <td>{a.dataFimPrevista ? new Date(a.dataFimPrevista).toLocaleDateString("pt-AO") : "—"}</td>
                   <td>{Number(a.valorTotal).toLocaleString("pt-AO")}</td>
@@ -174,16 +192,16 @@ export default function AlugueresPage({ onMenuToggle, onLogout }: AlugueresPageP
               <input type="text" id="clienteNome" required className="form-control"
                 placeholder="Nome completo ou empresa" value={form.clienteNome ?? ""} onChange={f("clienteNome")} />
             </div>
-            <div className="form-group">
-              <label className="form-label">Contacto do Cliente</label>
-              <input type="text" id="clienteContato" className="form-control"
-                placeholder="Telefone ou email" value={form.clienteContato ?? ""} onChange={f("clienteContato")} />
-            </div>
+              <div className="form-group">
+                <label className="form-label">Contacto do Cliente</label>
+                <input type="text" id="clienteContato" className="form-control"
+                  placeholder="Telefone ou email" value={(form as any).cliente_contato ?? ""} onChange={f("cliente_contato")} />
+              </div>
 
             <div className="grid-2">
               <div className="form-group">
                 <label className="form-label">Veículo *</label>
-                <select id="veiculoId" required className="form-select" value={form.veiculoId ?? ""} onChange={f("veiculoId")}>
+                <select id="veiculoId" required className="form-select" value={(form as any).viaturaId ?? ""} onChange={f("viaturaId")}>
                   <option value="">Selecione um veículo</option>
                   {veiculos.map((v) => (
                     <option key={v.id} value={v.id}>{v.marca} {v.modelo} ({v.placa})</option>
@@ -201,9 +219,9 @@ export default function AlugueresPage({ onMenuToggle, onLogout }: AlugueresPageP
               </div>
             </div>
 
-            <div className="form-group">
-              <label className="form-label">Rota</label>
-              <select id="rotaId" className="form-select" value={form.rotaId ?? ""} onChange={f("rotaId")}>
+              <div className="form-group">
+                <label className="form-label">Rota</label>
+                <select id="rotaId" className="form-select" value={(form as any).rota_id ?? ""} onChange={f("rota_id")}>
                 <option value="">Selecione uma rota</option>
                 {rotas.filter((r) => r.status === "ativa").map((r) => (
                   <option key={r.id} value={r.id}>{r.nomeRota} ({r.origem} → {r.destino})</option>
@@ -228,7 +246,7 @@ export default function AlugueresPage({ onMenuToggle, onLogout }: AlugueresPageP
               <div className="form-group">
                 <label className="form-label">Valor Diária (Kz)</label>
                 <input type="number" id="valorDiaria" className="form-control" min={0}
-                  value={form.valorDiaria ?? ""} onChange={f("valorDiaria")} />
+                  value={(form as any).valor_diaria ?? ""} onChange={f("valor_diaria")} />
               </div>
               <div className="form-group">
                 <label className="form-label">Valor Total (Kz) *</label>

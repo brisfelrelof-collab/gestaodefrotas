@@ -1,26 +1,26 @@
-// pages/LoginPage.tsx
+// src/pages/LoginPage.tsx
+// ─── Firebase-backed Login Page ────────────────────────────────────────────────
+
 import { useState } from "react";
 import { authLogin } from "../store";
 
 interface LoginPageProps {
-  onLogin: () => void;
+  onLogin:    () => void;
+  onRegister: () => void;
 }
 
-export default function LoginPage({ onLogin }: LoginPageProps) {
-  const [email, setEmail]       = useState("admin@gmail.com");
+export default function LoginPage({ onLogin, onRegister }: LoginPageProps) {
+  const [email,    setEmail]    = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError]       = useState("");
-  const [loading, setLoading]   = useState(false);
+  const [error,    setError]    = useState("");
+  const [loading,  setLoading]  = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setLoading(true);
 
-    // small delay to simulate async (mirrors original Firebase call)
-    await new Promise((r) => setTimeout(r, 300));
-
-    const result = authLogin(email, password);
+    const result = await authLogin(email, password);
     setLoading(false);
 
     if (result.ok) {
@@ -30,11 +30,12 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
     }
   };
 
+  
+
   return (
     <div className="login-bg">
       <div className="login-card">
         <div className="login-header">
-          {/* Logo placeholder (original uses logo.jpg) */}
           <div
             style={{
               width: 80, height: 80, borderRadius: "50%",
@@ -46,56 +47,52 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
             <i className="bi bi-truck" style={{ color: "white", fontSize: 36 }} />
           </div>
           <h2>Gestão de Frota</h2>
-          <p id="formTitle" style={{ color: "#999", fontSize: 14, marginTop: 4 }}>
-            Faça login para acessar o sistema
+          <p style={{ color: "#999", fontSize: 14, marginTop: 4 }}>
+            Faça login para aceder ao sistema
           </p>
         </div>
 
-        {/* Alerts */}
-        <div className={`alert alert-danger ${error ? "show" : ""}`} id="errorAlert" role="alert">
-          {error}
-        </div>
+        {error && (
+          <div className="alert alert-danger show" role="alert">
+            <i className="bi bi-exclamation-triangle-fill" style={{ marginRight: 8 }} />
+            {error}
+          </div>
+        )}
 
-        <form id="authForm" onSubmit={handleSubmit}>
+        <form onSubmit={handleSubmit} autoComplete="off">
           <div className="form-group">
-            <label htmlFor="email" className="form-label">E-mail</label>
+            <label className="form-label">Nome (ou e-mail)</label>
             <input
-              type="email"
-              className="form-control"
-              id="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
+              type="text" className="form-control" required
+              placeholder="Introduza o seu nome de utilizador"
+              autoComplete="off"
+              value={email} onChange={(e) => setEmail(e.target.value)}
             />
           </div>
           <div className="form-group">
-            <label htmlFor="password" className="form-label">Senha</label>
+            <label className="form-label">Senha</label>
             <input
-              type="password"
-              className="form-control"
-              id="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
+              type="password" className="form-control" required
+              autoComplete="new-password"
+              value={password} onChange={(e) => setPassword(e.target.value)}
             />
           </div>
 
-          <button
-            type="submit"
-            className="btn-login text-white"
-            id="submitBtn"
-            disabled={loading}
-          >
-            {loading ? <><span className="loading-spinner" style={{ marginRight: 8, width: 16, height: 16 }} />A entrar...</> : "Entrar"}
+          <button type="submit" className="btn-login text-white" disabled={loading}>
+            {loading
+              ? <><span className="loading-spinner" style={{ marginRight: 8, width: 16, height: 16 }} />A entrar...</>
+              : "Entrar"}
           </button>
         </form>
 
-        <div className="text-center mt-3" id="toggleText" style={{ marginTop: 16, fontSize: 13, color: "#888" }}>
-          Não tem uma conta? Entre em contacto com o administrador.
-        </div>
-
-        <div style={{ marginTop: 12, fontSize: 11, color: "#bbb", textAlign: "center" }}>
-          Demo: admin@gmail.com / 1
+        <div style={{ marginTop: 16, textAlign: "center", fontSize: 13, color: "#888" }}>
+          É um cliente?{" "}
+          <button
+            onClick={onRegister}
+            style={{ background: "none", border: "none", color: "var(--primary-color)", cursor: "pointer", fontWeight: 600 }}
+          >
+            Crie a sua conta
+          </button>
         </div>
       </div>
     </div>

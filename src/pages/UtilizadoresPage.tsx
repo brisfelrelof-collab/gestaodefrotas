@@ -5,8 +5,8 @@ import { StatusBadge, Modal, EmptyRow } from "../components/StatusBadge";
 import { utilizadoresStore } from "../store";
 import type { AppUser } from "../types";
 
-const EMPTY: Omit<AppUser,"uid"> = {
-  email:"", nome:"", cargo:"operador", status:"ativo",
+const EMPTY: Partial<AppUser> = {
+  email:"", nome:"", cargo:"operador", status:"ativo", role: "usuario",
 };
 
 interface UtilizadoresPageProps {
@@ -20,8 +20,11 @@ export default function UtilizadoresPage({ onMenuToggle, onLogout }: Utilizadore
   const [form,   setForm]   = useState<Partial<AppUser & { senha?: string }>>({ ...EMPTY });
   const [toast,  setToast]  = useState("");
 
-  const reload = () => setUsers(utilizadoresStore.getAll());
-  useEffect(() => { reload(); }, []);
+  const reload = async () => {
+    const rows = await utilizadoresStore.getAll();
+    setUsers(rows as AppUser[]);
+  };
+  useEffect(() => { void reload(); }, []);
 
   const stats = {
     total:        users.length,
@@ -33,7 +36,8 @@ export default function UtilizadoresPage({ onMenuToggle, onLogout }: Utilizadore
   const openNew  = () => { setForm({ ...EMPTY }); setModal(true); };
   const openEdit = (u: AppUser) => { setForm({ ...u }); setModal(true); };
 
-  const handleDelete = (id: string) => {
+  const handleDelete = (id?: string) => {
+    if (!id) return;
     if (!confirm("Excluir este utilizador?")) return;
     utilizadoresStore.remove(id); reload();
   };
@@ -48,21 +52,22 @@ export default function UtilizadoresPage({ onMenuToggle, onLogout }: Utilizadore
     setTimeout(() => setToast(""), 3000);
   }
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!form.nome?.trim())   { alert("Nome é obrigatório!"); return; }
     if (!form.email?.trim())  { alert("Email é obrigatório!"); return; }
     if (!form.uid && !form.senha?.trim()) { alert("Senha é obrigatória para novo utilizador!"); return; }
     if (!form.uid && (form.senha?.length ?? 0) < 6) { alert("Senha deve ter mínimo 6 caracteres!"); return; }
 
-    if (!form.uid && utilizadoresStore.exists("email" as any, form.email)) {
+    if (!form.uid && await utilizadoresStore.exists("email" as any, form.email)) {
       alert("Já existe um utilizador com este email!"); return;
     }
 
-    const data: Omit<AppUser,"uid"> = {
+    const data: Partial<AppUser> = {
       email:  form.email!,
       nome:   form.nome!,
       cargo:  form.cargo  ?? "operador",
       status: form.status ?? "ativo",
+      role:   (form as any).role ?? (form.cargo === "admin" ? "superadmin" : "usuario"),
       telefone: form.telefone,
     };
 

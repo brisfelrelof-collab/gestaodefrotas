@@ -1,150 +1,209 @@
-/**
- * store/index.ts
- * Minimal localStorage-based store — mirrors the no-firebase.js shim from the
- * original project. Provides typed CRUD helpers for every collection.
- */
+// src/store/index.ts
+// ─── Store com backend Supabase ───────────────────────────────────────────────
+// Mantém a mesma API pública das páginas existentes.
+// localStorage foi completamente substituído por Supabase.
 
-import type { AppUser, Veiculo, Motorista, Rota, Aluguer } from "../types";
-
-// ─── Core helpers ─────────────────────────────────────────────────────────────
-function loadJSON<T>(key: string, def: T): T {
-  try {
-    const v = localStorage.getItem(key);
-    return v ? (JSON.parse(v) as T) : def;
-  } catch {
-    return def;
-  }
-}
-
-function saveJSON<T>(key: string, val: T): void {
-  localStorage.setItem(key, JSON.stringify(val));
-}
-
-type Collection<T> = Record<string, T>;
-
-function getCol<T>(name: string): Collection<T> {
-  return loadJSON<Collection<T>>(`coll:${name}`, {});
-}
-
-function setCol<T>(name: string, col: Collection<T>): void {
-  saveJSON(`coll:${name}`, col);
-}
-
-function colToArray<T>(col: Collection<any>): (T & { id: string })[] {
-  return Object.entries(col).map(([id, data]) => ({ id, ...(data as object) } as T & { id: string }));
-}
-
-function genId(): string {
-  return "d" + Date.now() + Math.floor(Math.random() * 1000);
-}
+import { supabase } from "../supabase/client";
+import { supabaseLogin, supabaseLogout, getUserProfile } from "../supabase/auth";
+import {
+  viaturasDB, motoristasDB, proprietariosDB,
+  servicosDB, transacoesDB, usuariosClientesDB,
+  rotasDB, usersDB,
+} from "../supabase/database";
+import type {
+  AppUser, Viatura, Motorista, Rota, Servico,
+  Proprietario, Transacao, UsuarioCliente,
+} from "../types";
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
-export interface LoginResult {
-  ok: boolean;
-  user?: AppUser;
-  error?: string;
+export interface LoginResult { ok: boolean; user?: AppUser; error?: string; }
+
+export async function authLogin(email: string, password: string): Promise<LoginResult> {
+  return supabaseLogin(email, password);
 }
 
-function seedDefaultUsers(): void {
-  const usersKey = "app_users";
-  const users = loadJSON<AppUser[]>(usersKey, []);
-
-  function ensure(email: string, password: string, nome: string, cargo: AppUser["cargo"]) {
-    if (users.find((u) => u.email === email)) return;
-    const uid = "u" + Date.now() + Math.floor(Math.random() * 1000);
-    (users as any[]).push({ uid, email, password, nome, cargo, status: "ativo", createdAt: new Date().toISOString() });
-    saveJSON(usersKey, users);
-    const col = getCol<Omit<AppUser, "id">>("usuarios");
-    col[uid] = { uid, email, nome, cargo, status: "ativo", createdAt: new Date().toISOString() };
-    setCol("usuarios", col);
-  }
-
-  ensure("admin@gmail.com", "1", "Administrador", "admin");
-  ensure("d@gmail.com", "1", "Usuário Teste", "operador");
-}
-
-seedDefaultUsers();
-
-export function authLogin(email: string, password: string): LoginResult {
-  const users = loadJSON<any[]>("app_users", []);
-  const found = users.find((u) => u.email === email);
-  if (!found) return { ok: false, error: "Utilizador não encontrado." };
-  const aliasRange = /^[1-6]$/;
-  const ok =
-    found.password === password ||
-    (found.password === "1" && aliasRange.test(String(password)));
-  if (!ok) return { ok: false, error: "Senha incorrecta." };
-  saveJSON("current_user", found);
-  return { ok: true, user: found as AppUser };
-}
-
-export function authLogout(): void {
-  localStorage.removeItem("current_user");
+export async function authLogout(): Promise<void> {
+  return supabaseLogout();
 }
 
 export function authCurrentUser(): AppUser | null {
-  return loadJSON<AppUser | null>("current_user", null);
+  // Síncrono — só devolve dados básicos da sessão local Supabase
+  // Para dados completos do perfil usa o hook useAuth()
+  const session = (supabase as any).auth._session ?? null;
+  if (!session?.user) return null;
+  return { id: session.user.id, uid: session.user.id, email: session.user.email ?? "", role: "superadmin" };
 }
 
-// ─── Generic CRUD factory ─────────────────────────────────────────────────────
-function makeCRUD<T>(collName: string) {
-  return {
-    getAll(): (T & { id: string })[] {
-      return colToArray<T>(getCol<any>(collName));
-    },
-    getById(id: string): (T & { id: string }) | null {
-      const col = getCol<any>(collName);
-      return col[id] ? ({ id, ...col[id] } as unknown as T & { id: string }) : null;
-    },
-    add(data: Omit<T, "id">): T & { id: string } {
-      const col = getCol<any>(collName);
-      const id = genId();
-      const record = { ...data, createdAt: new Date().toISOString() };
-      col[id] = record;
-      setCol(collName, col);
-      return ({ id, ...record } as unknown) as T & { id: string };
-    },
-    update(id: string, data: Partial<Omit<T, "id">>): (T & { id: string }) | null {
-      const col = getCol<any>(collName);
-      if (!col[id]) return null;
-      col[id] = { ...col[id], ...data };
-      setCol(collName, col);
-      return ({ id, ...col[id] } as unknown) as T & { id: string };
-    },
-    remove(id: string): boolean {
-      const col = getCol<any>(collName);
-      if (!col[id]) return false;
-      delete col[id];
-      setCol(collName, col);
-      return true;
-    },
-    exists(field: keyof T, value: unknown, excludeId?: string): boolean {
-      return colToArray<T>(getCol<any>(collName)).some(
-        (item) => item[field as keyof (T & { id: string })] === value && item.id !== excludeId
-      );
-    },
-  };
-}
-
-// ─── Collections ─────────────────────────────────────────────────────────────
-export const veiculosStore = makeCRUD<Veiculo>("veiculos");
-export const motoristasStore = makeCRUD<Motorista>("motoristas");
-export const rotasStore = makeCRUD<Rota>("rotas");
-export const alugueresStore = makeCRUD<Aluguer>("alugueres");
-export const utilizadoresStore = makeCRUD<AppUser>("usuarios");
-
-// ─── Plate validation (Angola) ────────────────────────────────────────────────
+// ─── Validação de placa angolana (inalterado) ─────────────────────────────────
 export function validarPlacaAngolana(placa: string): { valido: boolean; formatado: string } {
   placa = placa.trim().toUpperCase();
-  const antigo = /^[A-Z]{3}-\d{4}$/;
-  const novo = /^[A-Z]{2}-\d{2}-\d{2}-[A-Z]{2}$/;
-  const novoSemHifen = /^[A-Z]{2}\d{2}\d{2}[A-Z]{2}$/;
-
-  if (antigo.test(placa)) return { valido: true, formatado: placa };
-  if (novo.test(placa)) return { valido: true, formatado: placa };
+  const antigo       = /^[A-Z]{3}-\d{4}$/;
+  const novo         = /^[A-Z]{2}-\d{2}-\d{2}-[A-Z]{2}$/;
+  const novoSemHifen = /^[A-Z]{2}\d{4}[A-Z]{2}$/;
+  if (antigo.test(placa))       return { valido: true, formatado: placa };
+  if (novo.test(placa))         return { valido: true, formatado: placa };
   if (novoSemHifen.test(placa)) {
-    const f = `${placa.slice(0, 2)}-${placa.slice(2, 4)}-${placa.slice(4, 6)}-${placa.slice(6, 8)}`;
+    const f = `${placa.slice(0,2)}-${placa.slice(2,4)}-${placa.slice(4,6)}-${placa.slice(6,8)}`;
     return { valido: true, formatado: f };
   }
   return { valido: false, formatado: placa };
 }
+
+// ─── veiculosStore ────────────────────────────────────────────────────────────
+export const veiculosStore = {
+  getAll:   viaturasDB.getAll,
+  getById:  viaturasDB.getById,
+  getByProprietario: viaturasDB.getByProprietario,
+  add:      viaturasDB.insert,
+  update:   viaturasDB.update,
+  remove:   viaturasDB.remove,
+  listenAll: viaturasDB.listenAll,
+  listenByProprietario: viaturasDB.listenByProprietario,
+  exists: async (field: keyof Viatura, value: unknown, excludeId?: string): Promise<boolean> => {
+    const all = await viaturasDB.getAll();
+    const dbField = field === "placa" ? "placa" : field;
+    return all.some((v: any) => v[dbField] === value && v.id !== excludeId);
+  },
+};
+
+// ─── motoristasStore ─────────────────────────────────────────────────────────
+export const motoristasStore = {
+  getAll:  motoristasDB.getAll,
+  getById: motoristasDB.getById,
+  add:     motoristasDB.insert,
+  update:  motoristasDB.update,
+  remove:  motoristasDB.remove,
+  exists: async (field: keyof Motorista, value: unknown, excludeId?: string): Promise<boolean> => {
+    const all = await motoristasDB.getAll();
+    return all.some((m: any) => m[field] === value && m.id !== excludeId);
+  },
+};
+
+// ─── proprietariosStore ──────────────────────────────────────────────────────
+export const proprietariosStore = {
+  getAll:  proprietariosDB.getAll,
+  getById: proprietariosDB.getById,
+  add:     proprietariosDB.insert,
+  set:     proprietariosDB.upsert,
+  update:  proprietariosDB.update,
+  remove:  proprietariosDB.remove,
+  exists: async (field: keyof Proprietario, value: unknown, excludeId?: string): Promise<boolean> => {
+    const all = await proprietariosDB.getAll();
+    return all.some((p: any) => p[field] === value && p.id !== excludeId);
+  },
+};
+
+// ─── servicosStore ───────────────────────────────────────────────────────────
+export const servicosStore = {
+  getAll:            servicosDB.getAll,
+  getById:           servicosDB.getById,
+  getAtivos:         servicosDB.getAtivos,
+  getFinalizados:    servicosDB.getFinalizados,
+  getByViatura:      servicosDB.getByViatura,
+  getByUsuario:      servicosDB.getByUsuario,
+  getByProprietario: servicosDB.getByProprietario,
+  add:               servicosDB.insert,
+  update:            servicosDB.update,
+  remove:            servicosDB.remove,
+};
+
+// ─── alugueresStore (alias legado para AlugueresPage.tsx) ────────────────────
+export const alugueresStore = {
+  getAll: async () => {
+    const sv = await servicosDB.getAll();
+    return sv.map((s) => ({
+      ...s,
+      // Normaliza campos camelCase esperados pela AlugueresPage
+      veiculoId:       s.viatura_id,
+      clienteNome:     s.cliente_nome ?? "",
+      clienteContato:  s.cliente_contato ?? "",
+      motoristaId:     s.motorista_id,
+      rotaId:          s.rota_id,
+      dataInicio:      s.data_inicio ?? "",
+      dataFimPrevista: s.data_fim_prevista ?? "",
+      dataFimReal:     s.data_fim_real,
+      valorTotal:      s.valor_total ?? 0,
+      status:
+        s.status === "em_andamento" ? "ativo" :
+        s.status === "finalizado"   ? "concluido" : "cancelado",
+    })) as any[];
+  },
+  add: async (data: any) => {
+    const valorTotal = data.valorTotal ?? data.valor_total ?? 0;
+    return servicosDB.insert({
+      tipo:               data.tipo ?? "aluguer",
+      status:             "em_andamento",
+      usuario_id:         data.usuarioId ?? data.usuario_id ?? "",
+      viatura_id:         data.veiculoId ?? data.viatura_id ?? "",
+      motorista_id:       data.motoristaId ?? data.motorista_id,
+      proprietario_id:    data.proprietarioId ?? data.proprietario_id ?? "",
+      rota_id:            data.rotaId ?? data.rota_id,
+      cliente_nome:       data.clienteNome ?? data.cliente_nome ?? "",
+      cliente_contato:    data.clienteContato ?? data.cliente_contato,
+      data_inicio:        data.dataInicio ?? data.data_inicio ?? new Date().toISOString(),
+      data_fim_prevista:  data.dataFimPrevista ?? data.data_fim_prevista,
+      valor_total:        valorTotal,
+      valor_proprietario: Math.round(valorTotal * 0.7 * 100) / 100,
+      valor_sistema:      Math.round(valorTotal * 0.3 * 100) / 100,
+      observacoes:        data.observacoes,
+    } as any);
+  },
+  update: servicosDB.update,
+  remove: servicosDB.remove,
+  exists: async () => false,
+};
+
+// ─── transacoesStore ─────────────────────────────────────────────────────────
+export const transacoesStore = {
+  getAll:            transacoesDB.getAll,
+  getByProprietario: transacoesDB.getByProprietario,
+  getByViatura:      transacoesDB.getByViatura,
+  add:               transacoesDB.insert,
+  update:            transacoesDB.update,
+};
+
+// ─── utilizadoresStore ───────────────────────────────────────────────────────
+export const utilizadoresStore = {
+  getAll:   usersDB.getAll,
+  getById:  usersDB.getById,
+  update:   usersDB.update,
+  remove:   usersDB.remove,
+  add: async (data: any) => {
+    await usersDB.upsert(data.id ?? data.uid, data);
+    return data;
+  },
+  exists: async (field: string, value: unknown, excludeId?: string): Promise<boolean> => {
+    const all = await usersDB.getAll();
+    return all.some((u: any) => u[field] === value && u.id !== excludeId);
+  },
+};
+
+// ─── rotasStore ──────────────────────────────────────────────────────────────
+export const rotasStore = {
+  getAll: async (): Promise<(Rota & { id: string })[]> => {
+    const rows = await rotasDB.getAll();
+    // Normaliza para camelCase esperado por RotasPage
+    return rows.map((r) => ({
+      ...r,
+      nomeRota:      r.nome_rota ?? (r as any).nomeRota ?? "",
+      tempoEstimado: r.tempo_estimado ?? (r as any).tempoEstimado ?? "",
+    }));
+  },
+  getById: rotasDB.getById,
+  add:     rotasDB.insert,
+  update:  rotasDB.update,
+  remove:  rotasDB.remove,
+  exists: async (field: keyof Rota, value: unknown, excludeId?: string): Promise<boolean> => {
+    const all = await rotasDB.getAll();
+    return all.some((r: any) => r[field] === value && r.id !== excludeId);
+  },
+};
+
+// ─── usuariosClientesStore ───────────────────────────────────────────────────
+export const usuariosClientesStore = {
+  getAll:  usuariosClientesDB.getAll,
+  getById: usuariosClientesDB.getById,
+  set:     usuariosClientesDB.upsert,
+  update:  usuariosClientesDB.update,
+  remove:  usuariosClientesDB.remove,
+};
