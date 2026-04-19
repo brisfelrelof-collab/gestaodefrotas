@@ -20,7 +20,15 @@ export default function handler(req, res) {
 
   // ── POST — ESP32 envia posição ────────────────────────────────────────────────
   if (req.method === "POST") {
-    const { nome, lat, lng, spd, fix, sat, alt } = req.body;
+    const { nome: rawNome, lat, lng, spd, fix, sat, alt } = req.body;
+
+    // Normaliza nomes comuns (aceita variações como "automove1" ou "automovel1")
+    const normalizeNome = (n) => {
+      if (!n) return n;
+      // troca prefixes automov/automovel/automove por 'viatura'
+      return n.replace(/^automovel?/i, "viatura").replace(/^automove/i, "viatura");
+    };
+    const nome = normalizeNome(String(rawNome));
 
     if (!nome || lat === undefined || lng === undefined) {
       return res.status(400).json({ error: "Campos obrigatórios: nome, lat, lng" });
@@ -44,7 +52,12 @@ export default function handler(req, res) {
 
   // ── GET — frontend pede posições ─────────────────────────────────────────────
   if (req.method === "GET") {
-    const { nome } = req.query;
+    const { nome: qNome } = req.query;
+    const normalizeNome = (n) => {
+      if (!n) return n;
+      return String(n).replace(/^automovel?/i, "viatura").replace(/^automove/i, "viatura");
+    };
+    const nome = qNome ? normalizeNome(qNome) : undefined;
 
     // GET /api/gps?nome=viatura1  →  devolve apenas essa viatura
     if (nome) {
